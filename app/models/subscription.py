@@ -133,11 +133,6 @@ class Subscription(Base):
     @property
     def has_payment_issues(self):
         """Check if subscription has active payment issues"""
-        # Log for debugging
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"Checking has_payment_issues: dunning_stage='{self.dunning_stage}', type={type(self.dunning_stage)}")
-        
         # Handle None or empty string
         if not self.dunning_stage:
             return False
@@ -146,10 +141,7 @@ class Subscription(Base):
         stage_str = str(self.dunning_stage).lower().strip()
         
         # Check if it's not 'none'
-        has_issues = stage_str not in ['none', '']
-        logger.info(f"has_payment_issues result: {has_issues}")
-        
-        return has_issues
+        return stage_str not in ['none', '']
     
     @property
     def is_suspended(self):
