@@ -28,8 +28,7 @@ def run_migrations():
         command.current(alembic_cfg)
         
         # Show pending migrations
-        logger.info("\nPending migrations:")
-        command.history(alembic_cfg, indicate_current=True)
+        logger.info("\nChecking for pending migrations...")
         
         # Run the migrations
         logger.info("\nRunning migrations...")
