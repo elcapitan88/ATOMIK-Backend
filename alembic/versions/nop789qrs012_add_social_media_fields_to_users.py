@@ -23,23 +23,10 @@ def upgrade():
     op.add_column('users', sa.Column('instagram_handle', sa.String(), nullable=True))
     op.add_column('users', sa.Column('youtube_handle', sa.String(), nullable=True))
     
-    # Note: discord_handle might already exist, so we'll check first
-    # If it doesn't exist, add it
-    from sqlalchemy import inspect
-    from sqlalchemy import create_engine
-    from app.core.config import settings
-    
-    # Create engine to inspect the database
-    engine = create_engine(settings.DATABASE_URL)
-    inspector = inspect(engine)
-    columns = [col['name'] for col in inspector.get_columns('users')]
-    
-    if 'discord_handle' not in columns:
-        op.add_column('users', sa.Column('discord_handle', sa.String(), nullable=True))
-    
-    # Also add website if it doesn't exist
-    if 'website' not in columns:
-        op.add_column('users', sa.Column('website', sa.String(), nullable=True))
+    # Add discord_handle and website columns
+    # These might already exist in some deployments, but Alembic will handle that
+    op.add_column('users', sa.Column('discord_handle', sa.String(), nullable=True))
+    op.add_column('users', sa.Column('website', sa.String(), nullable=True))
 
 
 def downgrade():
