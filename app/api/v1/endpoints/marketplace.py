@@ -1,0 +1,356 @@
+# app/api/v1/endpoints/marketplace.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+import logging
+
+from app.api import deps
+from app.core.security import get_current_user
+from app.db.session import get_db
+from app.models.user import User
+from app.models.webhook import Webhook
+from app.models.strategy_pricing import StrategyPricing
+from app.models.strategy_purchase import StrategyPurchase
+from app.schemas.marketplace import (
+    StrategyPricingCreate,
+    StrategyPricingUpdate,
+    StrategyPricingResponse,
+    StrategyPurchaseRequest,
+    StrategyPurchaseResponse,
+    SubscriptionRequest,
+    SubscriptionResponse,
+    PricingOptionsResponse
+)
+from app.services.marketplace_service import MarketplaceService
+from app.services.stripe_connect_service import StripeConnectService
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+marketplace_service = MarketplaceService()
+stripe_connect_service = StripeConnectService()
+
+
+@router.post("/strategies/{token}/purchase", response_model=StrategyPurchaseResponse)
+async def purchase_strategy(
+    token: str,
+    purchase_request: StrategyPurchaseRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Purchase a strategy with one-time payment.
+    """
+    try:
+        # Get strategy by token
+        webhook = db.query(Webhook).filter(Webhook.token == token).first()
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found"
+            )
+        
+        # Get pricing information
+        pricing = db.query(StrategyPricing).filter(
+            StrategyPricing.webhook_id == webhook.id,
+            StrategyPricing.is_active == True
+        ).first()
+        
+        if not pricing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy pricing not found"
+            )
+        
+        if pricing.pricing_type == "free":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This strategy is free - no purchase required"
+            )
+        
+        # Check if user already has active purchase
+        existing_purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.status.in_(["pending", "completed"])
+        ).first()
+        
+        if existing_purchase:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You already have an active purchase for this strategy"
+            )
+        
+        # Process purchase
+        purchase = await marketplace_service.process_strategy_purchase(
+            db=db,
+            user=current_user,
+            webhook=webhook,
+            pricing=pricing,
+            payment_method_id=purchase_request.payment_method_id,
+            trial_requested=purchase_request.start_trial
+        )
+        
+        logger.info(f"Strategy purchase created: {purchase.id} for user {current_user.id}")
+        return purchase
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing strategy purchase: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process strategy purchase"
+        )
+
+
+@router.post("/strategies/{token}/subscribe", response_model=SubscriptionResponse)
+async def subscribe_to_strategy(
+    token: str,
+    subscription_request: SubscriptionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Subscribe to a paid strategy with recurring payments.
+    """
+    try:
+        # Get strategy by token
+        webhook = db.query(Webhook).filter(Webhook.token == token).first()
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found"
+            )
+        
+        # Get pricing information
+        pricing = db.query(StrategyPricing).filter(
+            StrategyPricing.webhook_id == webhook.id,
+            StrategyPricing.is_active == True
+        ).first()
+        
+        if not pricing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy pricing not found"
+            )
+        
+        if pricing.pricing_type not in ["subscription", "initiation_plus_sub"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This strategy is not available for subscription"
+            )
+        
+        # Check if user already has active subscription
+        existing_subscription = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.status.in_(["pending", "completed"]),
+            StrategyPurchase.purchase_type == "subscription"
+        ).first()
+        
+        if existing_subscription:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You already have an active subscription for this strategy"
+            )
+        
+        # Process subscription
+        subscription = await marketplace_service.process_strategy_subscription(
+            db=db,
+            user=current_user,
+            webhook=webhook,
+            pricing=pricing,
+            payment_method_id=subscription_request.payment_method_id,
+            billing_interval=subscription_request.billing_interval,
+            trial_requested=subscription_request.start_trial
+        )
+        
+        logger.info(f"Strategy subscription created: {subscription.id} for user {current_user.id}")
+        return subscription
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing strategy subscription: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process strategy subscription"
+        )
+
+
+@router.get("/strategies/{token}/pricing", response_model=PricingOptionsResponse)
+async def get_strategy_pricing(
+    token: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(deps.get_current_user_optional)
+):
+    """
+    Get pricing options for a strategy.
+    """
+    # Get strategy by token
+    webhook = db.query(Webhook).filter(Webhook.token == token).first()
+    if not webhook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found"
+        )
+    
+    # Get pricing information
+    pricing = db.query(StrategyPricing).filter(
+        StrategyPricing.webhook_id == webhook.id,
+        StrategyPricing.is_active == True
+    ).first()
+    
+    if not pricing:
+        # Return free pricing if no pricing set
+        return PricingOptionsResponse(
+            webhook_id=webhook.id,
+            pricing_type="free",
+            is_free=True,
+            user_has_access=True,
+            user_purchase=None
+        )
+    
+    # Check user's current access
+    user_purchase = None
+    user_has_access = pricing.pricing_type == "free"
+    
+    if current_user:
+        user_purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.status.in_(["pending", "completed"])
+        ).first()
+        
+        if user_purchase:
+            user_has_access = True
+    
+    return PricingOptionsResponse(
+        webhook_id=webhook.id,
+        pricing_type=pricing.pricing_type,
+        base_amount=pricing.base_amount,
+        yearly_amount=pricing.yearly_amount,
+        setup_fee=pricing.setup_fee,
+        trial_days=pricing.trial_days,
+        is_trial_enabled=pricing.is_trial_enabled,
+        billing_intervals=["monthly", "yearly"] if pricing.pricing_type in ["subscription", "initiation_plus_sub"] else [],
+        is_free=pricing.pricing_type == "free",
+        user_has_access=user_has_access,
+        user_purchase=user_purchase
+    )
+
+
+@router.post("/webhook-pricing", response_model=StrategyPricingResponse)
+async def create_strategy_pricing(
+    pricing_data: StrategyPricingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create pricing configuration for a strategy.
+    """
+    try:
+        # Verify user owns the webhook
+        webhook = db.query(Webhook).filter(
+            Webhook.id == pricing_data.webhook_id,
+            Webhook.user_id == current_user.id
+        ).first()
+        
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found or access denied"
+            )
+        
+        # Check if pricing already exists
+        existing_pricing = db.query(StrategyPricing).filter(
+            StrategyPricing.webhook_id == webhook.id
+        ).first()
+        
+        if existing_pricing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pricing already exists for this strategy. Use PUT to update."
+            )
+        
+        # Create pricing
+        pricing = await marketplace_service.create_strategy_pricing(
+            db=db,
+            webhook=webhook,
+            pricing_data=pricing_data
+        )
+        
+        # Mark webhook as monetized
+        webhook.is_monetized = pricing_data.pricing_type != "free"
+        db.commit()
+        
+        logger.info(f"Strategy pricing created: {pricing.id} for webhook {webhook.id}")
+        return pricing
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating strategy pricing: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create strategy pricing"
+        )
+
+
+@router.put("/webhook-pricing/{pricing_id}", response_model=StrategyPricingResponse)
+async def update_strategy_pricing(
+    pricing_id: str,
+    pricing_update: StrategyPricingUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update pricing configuration for a strategy.
+    """
+    try:
+        # Get pricing and verify ownership
+        pricing = db.query(StrategyPricing).filter(
+            StrategyPricing.id == pricing_id
+        ).first()
+        
+        if not pricing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pricing configuration not found"
+            )
+        
+        # Verify user owns the webhook
+        webhook = db.query(Webhook).filter(
+            Webhook.id == pricing.webhook_id,
+            Webhook.user_id == current_user.id
+        ).first()
+        
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found or access denied"
+            )
+        
+        # Update pricing
+        updated_pricing = await marketplace_service.update_strategy_pricing(
+            db=db,
+            pricing=pricing,
+            update_data=pricing_update
+        )
+        
+        # Update webhook monetization status
+        webhook.is_monetized = updated_pricing.pricing_type != "free"
+        db.commit()
+        
+        logger.info(f"Strategy pricing updated: {pricing.id}")
+        return updated_pricing
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating strategy pricing: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update strategy pricing"
+        )

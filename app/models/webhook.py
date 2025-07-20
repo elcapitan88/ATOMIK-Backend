@@ -53,6 +53,7 @@ class Webhook(Base):
     subscriber_count = Column(Integer, default=0)
     rating = Column(Float, default=0.0)
     total_ratings = Column(Integer, default=0)
+    is_monetized = Column(Boolean, default=False)  # Whether this strategy has paid pricing
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -87,6 +88,20 @@ class Webhook(Base):
 
     ratings = relationship(
         "WebhookRating",
+        back_populates="webhook",
+        cascade="all, delete-orphan"
+    )
+    
+    # Creator marketplace relationships
+    pricing = relationship(
+        "StrategyPricing",
+        back_populates="webhook",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+    
+    purchases = relationship(
+        "StrategyPurchase",
         back_populates="webhook",
         cascade="all, delete-orphan"
     )

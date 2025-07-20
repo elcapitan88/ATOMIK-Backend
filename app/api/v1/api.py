@@ -16,6 +16,10 @@ try:
     # Import missing endpoints that are expected by frontend
     from .endpoints import chat, feature_flags, interactivebrokers
     logger.info("Chat, feature flags, and Interactive Brokers endpoints imported successfully")
+    
+    # Import creator marketplace endpoints
+    from .endpoints import creators, marketplace
+    logger.info("Creator marketplace endpoints imported successfully")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -65,6 +69,13 @@ try:
     
     api_router.include_router(futures_contracts.router, prefix="/futures-contracts", tags=["futures-contracts"])
     logger.info("All missing routers registered successfully")
+    
+    # Register creator marketplace routers
+    api_router.include_router(creators.router, prefix="/creators", tags=["creators"])
+    logger.info("Creators router registered")
+    
+    api_router.include_router(marketplace.router, prefix="/marketplace", tags=["marketplace"])
+    logger.info("Marketplace router registered")
 except Exception as e:
     logger.error(f"Error registering missing routers: {e}")
     import traceback

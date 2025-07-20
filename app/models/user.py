@@ -20,6 +20,14 @@ class User(Base):
     # Profile fields
     profile_picture = Column(String, nullable=True)
     phone = Column(String, nullable=True)
+    website = Column(String, nullable=True)
+    
+    # Social media links
+    x_handle = Column(String, nullable=True)  # X (formerly Twitter)
+    tiktok_handle = Column(String, nullable=True)
+    instagram_handle = Column(String, nullable=True)
+    youtube_handle = Column(String, nullable=True)
+    discord_handle = Column(String, nullable=True)
     
     # Add promo_code_id column
     promo_code_id = Column(Integer, ForeignKey("promo_codes.id", ondelete="SET NULL"), nullable=True)
@@ -32,6 +40,10 @@ class User(Base):
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
     trades = relationship("Trade", back_populates="user", cascade="all, delete-orphan")
     affiliate = relationship("Affiliate", back_populates="user", uselist=False)
+    
+    # Creator marketplace relationships
+    creator_profile = relationship("CreatorProfile", back_populates="user", uselist=False, foreign_keys="CreatorProfile.user_id")
+    strategy_purchases = relationship("StrategyPurchase", back_populates="user", cascade="all, delete-orphan")
     
     def __str__(self):
         return f"User(email={self.email})"
@@ -48,6 +60,10 @@ class User(Base):
     def is_beta_tester(self) -> bool:
         """Check if user has beta tester, moderator, or admin app role"""
         return self.app_role in ['admin', 'moderator', 'beta_tester']
+    
+    def is_creator(self) -> bool:
+        """Check if user is a verified creator"""
+        return self.creator_profile is not None and self.creator_profile.is_verified
     
     def has_app_role(self, role: str) -> bool:
         """Check if user has a specific app role"""

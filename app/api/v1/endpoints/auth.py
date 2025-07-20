@@ -301,9 +301,18 @@ async def update_profile(
         
         # Handle nested fields like socialMedia
         if "socialMedia" in profile_data and isinstance(profile_data["socialMedia"], dict):
-            # Serialize social media as JSON or create separate columns as needed
-            # For simplicity in this example, we're not handling nested fields yet
-            pass
+            social_data = profile_data["socialMedia"]
+            # Map frontend social media fields to backend columns
+            if "twitter" in social_data:  # Frontend still uses "twitter" key
+                current_user.x_handle = social_data["twitter"]
+            if "tiktok" in social_data:
+                current_user.tiktok_handle = social_data["tiktok"]
+            if "instagram" in social_data:
+                current_user.instagram_handle = social_data["instagram"]
+            if "youtube" in social_data:
+                current_user.youtube_handle = social_data["youtube"]
+            if "discord" in social_data:
+                current_user.discord_handle = social_data["discord"]
             
         # Handle preferences
         if "preferences" in profile_data and isinstance(profile_data["preferences"], dict):
@@ -361,7 +370,8 @@ async def verify_token(current_user: User = Depends(get_current_user)):
                 "full_name": current_user.full_name,
                 "phone": current_user.phone,
                 "profile_picture": current_user.profile_picture,
-                "app_role": current_user.app_role or "user"
+                "app_role": current_user.app_role or "user",
+                "is_creator": current_user.is_creator()
             }
         }
     except Exception as e:

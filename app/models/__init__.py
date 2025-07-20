@@ -8,6 +8,10 @@ from .order import Order
 from .trade import Trade, TradeExecution
 from .maintenance import MaintenanceSettings
 from .affiliate import Affiliate, AffiliateReferral, AffiliateClick, AffiliatePayout
+from .creator_profile import CreatorProfile
+from .strategy_pricing import StrategyPricing, PricingType, BillingInterval
+from .strategy_purchase import StrategyPurchase, PurchaseStatus, PurchaseType
+from .creator_earnings import CreatorEarnings, PayoutStatus
 
 # This ensures all models are registered
 __all__ = [
@@ -25,5 +29,14 @@ __all__ = [
     "Affiliate",
     "AffiliateReferral",
     "AffiliateClick",
-    "AffiliatePayout"
+    "AffiliatePayout",
+    "CreatorProfile",
+    "StrategyPricing",
+    "PricingType",
+    "BillingInterval",
+    "StrategyPurchase",
+    "PurchaseStatus",
+    "PurchaseType",
+    "CreatorEarnings",
+    "PayoutStatus"
 ]

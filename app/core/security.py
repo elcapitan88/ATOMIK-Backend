@@ -327,6 +327,40 @@ class SecurityService:
                 detail="Invalid refresh token"
             )
         
+def decode_access_token(token: str) -> Optional[dict]:
+    """
+    Decode JWT access token and return payload
+    Returns None if token is invalid
+    """
+    try:
+        # Decode JWT token
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
+        )
+        
+        # Validate token type if present
+        token_type = payload.get("type")
+        if token_type is not None and token_type != "access":
+            logger.warning(f"Invalid token type '{token_type}', expected 'access'")
+            return None
+            
+        return payload
+        
+    except JWTError as e:
+        # More specific JWT error logging for token decoding
+        if "Signature has expired" in str(e):
+            logger.debug("JWT token has expired during decoding")
+        elif "Invalid token" in str(e):
+            logger.warning(f"Invalid JWT token structure during decoding: {str(e)}")
+        else:
+            logger.error(f"JWT validation error during decoding: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Error in decode_access_token: {str(e)}")
+        return None
+
 def get_user_from_token(token: str) -> Optional[str]:
     """
     Extract user email from token without raising exceptions
