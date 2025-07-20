@@ -6,7 +6,7 @@ from sqlalchemy.sql import func
 import uuid
 from enum import Enum
 
-from app.database import Base
+from app.db.base_class import Base
 
 
 class PricingType(str, Enum):

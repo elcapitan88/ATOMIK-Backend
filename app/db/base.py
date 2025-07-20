@@ -36,6 +36,10 @@ from app.models.broker import BrokerAccount, BrokerCredentials  # noqa
 from app.models.subscription import Subscription
 from app.models.order import Order
 from app.models.trade import Trade, TradeExecution  # noqa
+from app.models.creator_profile import CreatorProfile  # noqa
+from app.models.strategy_pricing import StrategyPricing  # noqa
+from app.models.strategy_purchase import StrategyPurchase  # noqa
+from app.models.creator_earnings import CreatorEarnings  # noqa
 
 # Create a dependency for FastAPI endpoints
 def get_db():
@@ -69,6 +73,10 @@ def init_db():
         import app.models.subscription
         import app.models.order
         import app.models.trade
+        import app.models.creator_profile
+        import app.models.strategy_pricing
+        import app.models.strategy_purchase
+        import app.models.creator_earnings
         
         # Create all tables
         Base.metadata.create_all(bind=engine)
@@ -98,5 +106,9 @@ __all__ = [
     "Subscription",
     "Order",
     "Trade",
-    "TradeExecution"
+    "TradeExecution",
+    "CreatorProfile",
+    "StrategyPricing",
+    "StrategyPurchase",
+    "CreatorEarnings"
 ]
