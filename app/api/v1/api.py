@@ -13,9 +13,9 @@ try:
     from .endpoints import admin
     logger.info("Admin endpoint imported successfully")
     
-    # Import creators, chat, and feature_flags
-    from .endpoints import creators, chat, feature_flags
-    logger.info("Creators, chat, and feature_flags endpoints imported successfully")
+    # Import creators, chat, feature_flags, and marketplace
+    from .endpoints import creators, chat, feature_flags, marketplace
+    logger.info("Creators, chat, feature_flags, and marketplace endpoints imported successfully")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -74,6 +74,12 @@ try:
     logger.info("Feature flags router registered")
 except Exception as e:
     logger.error(f"Error registering feature_flags router: {e}")
+
+try:
+    api_router.include_router(marketplace.router, prefix="/marketplace", tags=["marketplace"])
+    logger.info("Marketplace router registered")
+except Exception as e:
+    logger.error(f"Error registering marketplace router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"

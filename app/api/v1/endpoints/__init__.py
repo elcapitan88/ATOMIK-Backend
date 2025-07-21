@@ -13,6 +13,7 @@ from . import admin
 from . import creators
 from . import chat
 from . import feature_flags
+from . import marketplace
 
 __all__ = [
     "auth",
@@ -26,5 +27,6 @@ __all__ = [
     "admin",
     "creators",
     "chat",
-    "feature_flags"
+    "feature_flags",
+    "marketplace"
 ]
