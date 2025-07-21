@@ -11,10 +11,6 @@ from . import tradovate
 from . import webhooks
 from . import admin
 from . import creators
-from . import chat
-from . import feature_flags
-from . import interactivebrokers
-from . import marketplace
 
 __all__ = [
     "auth",
@@ -26,9 +22,5 @@ __all__ = [
     "tradovate",
     "webhooks",
     "admin",
-    "creators",
-    "chat",
-    "feature_flags",
-    "interactivebrokers",
-    "marketplace"
+    "creators"
 ]
