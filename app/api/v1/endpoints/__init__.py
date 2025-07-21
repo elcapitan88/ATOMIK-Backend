@@ -12,6 +12,7 @@ from . import webhooks
 from . import admin
 from . import creators
 from . import chat
+from . import feature_flags
 
 __all__ = [
     "auth",
@@ -24,5 +25,6 @@ __all__ = [
     "webhooks",
     "admin",
     "creators",
-    "chat"
+    "chat",
+    "feature_flags"
 ]
