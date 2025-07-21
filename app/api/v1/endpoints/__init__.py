@@ -10,6 +10,11 @@ from . import subscriptions as subscription
 from . import tradovate
 from . import webhooks
 from . import admin
+from . import chat
+from . import feature_flags
+from . import interactivebrokers
+from . import creators
+from . import marketplace
 
 __all__ = [
     "auth",
@@ -20,5 +25,10 @@ __all__ = [
     "subscription",
     "tradovate",
     "webhooks",
-    "admin"
+    "admin",
+    "chat",
+    "feature_flags",
+    "interactivebrokers",
+    "creators",
+    "marketplace"
 ]
