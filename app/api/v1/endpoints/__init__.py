@@ -14,7 +14,6 @@ from . import creators
 from . import chat
 from . import feature_flags
 from . import marketplace
-from . import interactivebrokers
 
 __all__ = [
     "auth",
@@ -29,6 +28,5 @@ __all__ = [
     "creators",
     "chat",
     "feature_flags",
-    "marketplace",
-    "interactivebrokers"
+    "marketplace"
 ]

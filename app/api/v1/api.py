@@ -13,9 +13,9 @@ try:
     from .endpoints import admin
     logger.info("Admin endpoint imported successfully")
     
-    # Import all additional endpoints
-    from .endpoints import creators, chat, feature_flags, marketplace, interactivebrokers
-    logger.info("All additional endpoints imported successfully")
+    # Import working endpoints (excluding interactivebrokers which breaks)
+    from .endpoints import creators, chat, feature_flags, marketplace
+    logger.info("Working endpoints imported successfully (excluding interactivebrokers)")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -81,11 +81,8 @@ try:
 except Exception as e:
     logger.error(f"Error registering marketplace router: {e}")
 
-try:
-    api_router.include_router(interactivebrokers.router, prefix="/brokers/interactivebrokers", tags=["interactive-brokers"])
-    logger.info("Interactive Brokers router registered")
-except Exception as e:
-    logger.error(f"Error registering interactivebrokers router: {e}")
+# DISABLED: interactivebrokers endpoint causes deployment failures
+# Need to investigate dependencies before re-enabling
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"
