@@ -13,9 +13,9 @@ try:
     from .endpoints import admin
     logger.info("Admin endpoint imported successfully")
     
-    # Only import creators endpoint - it should work now
-    from .endpoints import creators
-    logger.info("Creators endpoint imported successfully")
+    # Import all additional endpoints
+    from .endpoints import creators, chat, feature_flags, interactivebrokers, marketplace
+    logger.info("All additional endpoints imported successfully")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -50,19 +50,22 @@ try:
 except Exception as e:
     logger.error(f"Error registering admin router: {e}")
 
-# Register futures contracts router
-try:
-    api_router.include_router(futures_contracts.router, prefix="/futures-contracts", tags=["futures-contracts"])
-    logger.info("Futures contracts router registered")
-except Exception as e:
-    logger.error(f"Error registering futures contracts router: {e}")
+# Register additional routers
+routers_to_register = [
+    (futures_contracts, "/futures-contracts", "futures-contracts"),
+    (creators, "/creators", "creators"),
+    (chat, "/chat", "chat"),
+    (feature_flags, "/beta", "features"),
+    (interactivebrokers, "/brokers/interactivebrokers", "interactive-brokers"),
+    (marketplace, "/marketplace", "marketplace")
+]
 
-# Register creators router
-try:
-    api_router.include_router(creators.router, prefix="/creators", tags=["creators"])
-    logger.info("Creators router registered")
-except Exception as e:
-    logger.error(f"Error registering creators router: {e}")
+for router_module, prefix, tag in routers_to_register:
+    try:
+        api_router.include_router(router_module.router, prefix=prefix, tags=[tag])
+        logger.info(f"{tag} router registered successfully")
+    except Exception as e:
+        logger.error(f"Error registering {tag} router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"

@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.websocket.auth import get_current_user_websocket, get_user_chat_channels
 from app.websocket.manager import app_websocket_manager
-from app.db.base import get_db
+from app.db.session import get_db
 from app.models.user import User
 
 router = APIRouter()
