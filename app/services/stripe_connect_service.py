@@ -55,20 +55,77 @@ class StripeConnectService:
         self, 
         account_id: str, 
         refresh_url: str, 
-        return_url: str
+        return_url: str,
+        creator_profile: Optional[CreatorProfile] = None
     ) -> Dict[str, Any]:
         """
-        Create an account link for onboarding.
+        Create an account link for onboarding with prefilled user information.
         """
         try:
-            account_link = stripe.AccountLink.create(
-                account=account_id,
-                refresh_url=refresh_url,
-                return_url=return_url,
-                type="account_onboarding",
-            )
+            # Build the account link data
+            account_link_data = {
+                "account": account_id,
+                "refresh_url": refresh_url,
+                "return_url": return_url,
+                "type": "account_onboarding",
+            }
             
-            logger.info(f"Created account link for account {account_id}")
+            # Add prefill data if creator profile is provided
+            if creator_profile and creator_profile.user:
+                user = creator_profile.user
+                account_link_data["collect"] = "eventually_due"
+                
+                # First, update the Stripe account with prefill data
+                # This is more reliable than using account_link prefill
+                account_update_data = {}
+                
+                # Email
+                if user.email:
+                    account_update_data["email"] = user.email
+                
+                # Individual information
+                individual_data = {}
+                if creator_profile.display_name:
+                    name_parts = creator_profile.display_name.split(" ", 1)
+                    individual_data["first_name"] = name_parts[0]
+                    if len(name_parts) > 1:
+                        individual_data["last_name"] = name_parts[1]
+                elif user.full_name:
+                    name_parts = user.full_name.split(" ", 1)
+                    individual_data["first_name"] = name_parts[0]
+                    if len(name_parts) > 1:
+                        individual_data["last_name"] = name_parts[1]
+                elif user.username:
+                    individual_data["first_name"] = user.username
+                
+                # Phone number
+                if user.phone:
+                    individual_data["phone"] = user.phone
+                
+                # Add individual data if we have any
+                if individual_data:
+                    account_update_data["individual"] = individual_data
+                
+                # Business profile data
+                business_profile_data = {}
+                if user.website:
+                    business_profile_data["url"] = user.website
+                
+                if business_profile_data:
+                    account_update_data["business_profile"] = business_profile_data
+                
+                # Update the Stripe account with prefill data
+                if account_update_data:
+                    try:
+                        stripe.Account.modify(account_id, **account_update_data)
+                        logger.info(f"Updated Stripe account {account_id} with prefill data")
+                    except stripe.error.StripeError as update_error:
+                        logger.warning(f"Could not update account prefill data: {update_error}")
+                        # Continue with account link creation even if prefill fails
+            
+            account_link = stripe.AccountLink.create(**account_link_data)
+            
+            logger.info(f"Created account link for account {account_id} with prefill data")
             return account_link
             
         except stripe.error.StripeError as e:

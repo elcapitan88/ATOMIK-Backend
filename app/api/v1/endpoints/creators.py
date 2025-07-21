@@ -154,11 +154,12 @@ async def setup_stripe_connect(
             creator_profile.stripe_connect_account_id = account_id
             db.commit()
         
-        # Create account link for onboarding
+        # Create account link for onboarding with prefilled user data
         account_link = await stripe_connect_service.create_account_link(
             account_id=creator_profile.stripe_connect_account_id,
             refresh_url=setup_request.refresh_url,
-            return_url=setup_request.return_url
+            return_url=setup_request.return_url,
+            creator_profile=creator_profile
         )
         
         logger.info(f"Stripe Connect setup initiated for creator {creator_profile.id}")
