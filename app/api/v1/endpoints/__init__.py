@@ -11,6 +11,7 @@ from . import tradovate
 from . import webhooks
 from . import admin
 from . import creators
+from . import chat
 
 __all__ = [
     "auth",
@@ -22,5 +23,6 @@ __all__ = [
     "tradovate",
     "webhooks",
     "admin",
-    "creators"
+    "creators",
+    "chat"
 ]

@@ -13,9 +13,9 @@ try:
     from .endpoints import admin
     logger.info("Admin endpoint imported successfully")
     
-    # Only import creators for now
-    from .endpoints import creators
-    logger.info("Creators endpoint imported successfully")
+    # Import creators and chat
+    from .endpoints import creators, chat
+    logger.info("Creators and chat endpoints imported successfully")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -62,6 +62,12 @@ try:
     logger.info("Creators router registered")
 except Exception as e:
     logger.error(f"Error registering creators router: {e}")
+
+try:
+    api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
+    logger.info("Chat router registered")
+except Exception as e:
+    logger.error(f"Error registering chat router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"
