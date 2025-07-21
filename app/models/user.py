@@ -1,5 +1,6 @@
 # In app/models/user.py
 from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from ..db.base_class import Base
@@ -31,6 +32,9 @@ class User(Base):
     
     # Add promo_code_id column
     promo_code_id = Column(Integer, ForeignKey("promo_codes.id", ondelete="SET NULL"), nullable=True)
+    
+    # Creator marketplace field
+    creator_profile_id = Column(UUID(as_uuid=True), ForeignKey("creator_profiles.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships
     webhooks = relationship("Webhook", back_populates="user", cascade="all, delete-orphan")
