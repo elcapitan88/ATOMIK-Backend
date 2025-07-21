@@ -12,7 +12,6 @@ class SocialLinks(BaseModel):
 
 
 class CreatorProfileCreate(BaseModel):
-    display_name: Optional[str] = Field(None, max_length=100, description="Creator display name")
     bio: Optional[str] = Field(None, max_length=1000, description="Creator bio")
     trading_experience: Optional[str] = Field(None, max_length=50, description="Trading experience level")
     two_fa_enabled: bool = Field(False, description="Whether 2FA is enabled")
