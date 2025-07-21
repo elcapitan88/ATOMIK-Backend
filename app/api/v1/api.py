@@ -6,46 +6,20 @@ import logging
 logger = logging.getLogger(__name__)
 logger.info("Starting API router imports...")
 
-# Import basic required endpoints
-from .endpoints import auth, broker, subscription, webhooks, strategy, tradovate, binance, futures_contracts, admin
-logger.info("Basic endpoints imported successfully")
-
-# Import optional endpoints with individual error handling
-chat = None
-feature_flags = None
-interactivebrokers = None
-creators = None
-marketplace = None
-
 try:
-    from .endpoints import chat
-    logger.info("Chat endpoint imported successfully")
-except Exception as e:
-    logger.warning(f"Could not import chat endpoint: {e}")
-
-try:
-    from .endpoints import feature_flags
-    logger.info("Feature flags endpoint imported successfully")
-except Exception as e:
-    logger.warning(f"Could not import feature_flags endpoint: {e}")
-
-try:
-    from .endpoints import interactivebrokers
-    logger.info("Interactive Brokers endpoint imported successfully")
-except Exception as e:
-    logger.warning(f"Could not import interactivebrokers endpoint: {e}")
-
-try:
+    from .endpoints import auth, broker, subscription, webhooks, strategy, tradovate, binance, futures_contracts
+    logger.info("Basic endpoints imported successfully")
+    
+    from .endpoints import admin
+    logger.info("Admin endpoint imported successfully")
+    
+    # Only import creators endpoint - it should work now
     from .endpoints import creators
     logger.info("Creators endpoint imported successfully")
 except Exception as e:
-    logger.warning(f"Could not import creators endpoint: {e}")
-
-try:
-    from .endpoints import marketplace
-    logger.info("Marketplace endpoint imported successfully")
-except Exception as e:
-    logger.warning(f"Could not import marketplace endpoint: {e}")
+    logger.error(f"Error importing endpoints: {e}")
+    import traceback
+    logger.error(traceback.format_exc())
 
 # Temporarily disabled strategy_ai endpoints to fix startup issues
 # from .endpoints.strategy_ai import interpret_router, generate_router, templates_router, context_router
@@ -76,49 +50,19 @@ try:
 except Exception as e:
     logger.error(f"Error registering admin router: {e}")
 
-# Register optional routers only if they were imported successfully
-if chat is not None:
-    try:
-        api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
-        logger.info("Chat router registered")
-    except Exception as e:
-        logger.error(f"Error registering chat router: {e}")
-
-if feature_flags is not None:
-    try:
-        api_router.include_router(feature_flags.router, prefix="/beta", tags=["features"])
-        logger.info("Feature flags router registered")
-    except Exception as e:
-        logger.error(f"Error registering feature_flags router: {e}")
-
-if interactivebrokers is not None:
-    try:
-        api_router.include_router(interactivebrokers.router, prefix="/brokers/interactivebrokers", tags=["interactive-brokers"])
-        logger.info("Interactive Brokers router registered")
-    except Exception as e:
-        logger.error(f"Error registering interactivebrokers router: {e}")
-
-# Register futures contracts router (this should always work)
+# Register futures contracts router
 try:
     api_router.include_router(futures_contracts.router, prefix="/futures-contracts", tags=["futures-contracts"])
     logger.info("Futures contracts router registered")
 except Exception as e:
     logger.error(f"Error registering futures contracts router: {e}")
 
-# Register creator marketplace routers only if imported
-if creators is not None:
-    try:
-        api_router.include_router(creators.router, prefix="/creators", tags=["creators"])
-        logger.info("Creators router registered")
-    except Exception as e:
-        logger.error(f"Error registering creators router: {e}")
-
-if marketplace is not None:
-    try:
-        api_router.include_router(marketplace.router, prefix="/marketplace", tags=["marketplace"])
-        logger.info("Marketplace router registered")
-    except Exception as e:
-        logger.error(f"Error registering marketplace router: {e}")
+# Register creators router
+try:
+    api_router.include_router(creators.router, prefix="/creators", tags=["creators"])
+    logger.info("Creators router registered")
+except Exception as e:
+    logger.error(f"Error registering creators router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"
