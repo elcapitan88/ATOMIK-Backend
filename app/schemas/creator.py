@@ -41,6 +41,28 @@ class CreatorProfileResponse(BaseModel):
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat(),
+        }
+
+    @classmethod
+    def from_orm(cls, obj):
+        """Convert ORM object to Pydantic model with proper UUID handling."""
+        return cls(
+            id=str(obj.id),  # Convert UUID to string
+            user_id=obj.user_id,
+            display_name=obj.display_name,
+            bio=obj.bio,
+            trading_experience=obj.trading_experience,
+            total_subscribers=obj.total_subscribers,
+            current_tier=obj.current_tier,
+            platform_fee_override=obj.platform_fee_override,
+            stripe_connect_account_id=obj.stripe_connect_account_id,
+            is_verified=obj.is_verified,
+            two_fa_enabled=obj.two_fa_enabled,
+            created_at=obj.created_at,
+            updated_at=obj.updated_at
+        )
 
     @property
     def platform_fee_percentage(self) -> float:
