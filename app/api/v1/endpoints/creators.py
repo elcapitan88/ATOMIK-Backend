@@ -47,8 +47,7 @@ async def get_onboarding_status(
 
 @router.post("/update-onboarding-step")
 async def update_onboarding_step(
-    step: int,
-    data: Optional[dict] = None,
+    request_data: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -56,6 +55,9 @@ async def update_onboarding_step(
     Update user's onboarding step and data.
     """
     try:
+        step = request_data.get("step")
+        data = request_data.get("data")
+        
         current_user.onboarding_step = step
         current_user.onboarding_data = data
         db.commit()
