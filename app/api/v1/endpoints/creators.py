@@ -58,7 +58,7 @@ async def become_creator(
         )
         
         logger.info(f"User {current_user.id} became a creator with profile {creator_profile.id}")
-        return creator_profile
+        return CreatorProfileResponse.from_orm(creator_profile)
         
     except Exception as e:
         logger.error(f"Error creating creator profile: {str(e)}")
@@ -86,7 +86,7 @@ async def get_creator_profile(
             detail="Creator profile not found"
         )
     
-    return creator_profile
+    return CreatorProfileResponse.from_orm(creator_profile)
 
 
 @router.put("/profile", response_model=CreatorProfileResponse)
