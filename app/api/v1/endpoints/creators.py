@@ -29,6 +29,80 @@ stripe_connect_service = StripeConnectService()
 creator_service = CreatorService()
 
 
+@router.get("/onboarding-status")
+async def get_onboarding_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current user's onboarding status and progress.
+    """
+    return {
+        "onboarding_step": current_user.onboarding_step,
+        "onboarding_data": current_user.onboarding_data,
+        "is_creator": current_user.creator_profile_id is not None,
+        "creator_profile_id": str(current_user.creator_profile_id) if current_user.creator_profile_id else None
+    }
+
+
+@router.post("/update-onboarding-step")
+async def update_onboarding_step(
+    step: int,
+    data: Optional[dict] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update user's onboarding step and data.
+    """
+    try:
+        current_user.onboarding_step = step
+        current_user.onboarding_data = data
+        db.commit()
+        
+        logger.info(f"Updated onboarding step to {step} for user {current_user.id}")
+        
+        return {
+            "success": True,
+            "onboarding_step": step,
+            "onboarding_data": data
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating onboarding step: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update onboarding step"
+        )
+
+
+@router.post("/complete-onboarding")
+async def complete_onboarding(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Mark onboarding as complete and clear progress data.
+    """
+    try:
+        current_user.onboarding_step = None
+        current_user.onboarding_data = None
+        db.commit()
+        
+        logger.info(f"Completed onboarding for user {current_user.id}")
+        
+        return {"success": True, "message": "Onboarding completed successfully"}
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error completing onboarding: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to complete onboarding"
+        )
+
+
 @router.post("/become-creator", response_model=CreatorProfileResponse)
 async def become_creator(
     creator_data: CreatorProfileCreate,

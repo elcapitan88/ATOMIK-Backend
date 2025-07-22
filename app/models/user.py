@@ -35,6 +35,10 @@ class User(Base):
     
     # Creator marketplace field
     creator_profile_id = Column(UUID(as_uuid=True), ForeignKey("creator_profiles.id", ondelete="SET NULL"), nullable=True)
+    
+    # Creator onboarding progress tracking
+    onboarding_step = Column(Integer, nullable=True)  # 1, 2, 3, or None (completed)
+    onboarding_data = Column(JSON, nullable=True)     # Temporary form data during onboarding
 
     # Relationships
     webhooks = relationship("Webhook", back_populates="user", cascade="all, delete-orphan")

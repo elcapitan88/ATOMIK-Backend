@@ -23,6 +23,8 @@ class UserOut(UserBase):
     profile_picture: Optional[str] = None
     app_role: Optional[str] = None
     is_creator: Optional[bool] = False
+    onboarding_step: Optional[int] = None
+    onboarding_data: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -39,7 +41,9 @@ class UserOut(UserBase):
             is_active=user.is_active,
             profile_picture=user.profile_picture,
             app_role=user.app_role,
-            is_creator=user.is_creator()
+            is_creator=user.is_creator(),
+            onboarding_step=user.onboarding_step,
+            onboarding_data=user.onboarding_data
         )
 
 class UserInDB(UserBase):
