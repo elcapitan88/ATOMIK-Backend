@@ -272,6 +272,94 @@ async def get_tier_progress(
         )
 
 
+@router.post("/create-account-session")
+async def create_account_session(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create an Account Session for Stripe Embedded Components.
+    This enables in-app Stripe onboarding without redirects.
+    """
+    creator_profile = db.query(CreatorProfile).filter(
+        CreatorProfile.user_id == current_user.id
+    ).first()
+    
+    if not creator_profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found"
+        )
+    
+    try:
+        # Create or get existing Stripe Connect account
+        if not creator_profile.stripe_connect_account_id:
+            account_id = await stripe_connect_service.create_express_account(
+                creator_profile=creator_profile
+            )
+            creator_profile.stripe_connect_account_id = account_id
+            db.commit()
+        
+        # Create account session for embedded components
+        account_session = await stripe_connect_service.create_account_session(
+            account_id=creator_profile.stripe_connect_account_id,
+            creator_profile=creator_profile
+        )
+        
+        logger.info(f"Account session created for creator {creator_profile.id}")
+        return account_session
+        
+    except Exception as e:
+        logger.error(f"Error creating account session: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create account session"
+        )
+
+
+@router.get("/stripe-status")
+async def get_stripe_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check Stripe Connect account status and onboarding completion.
+    """
+    creator_profile = db.query(CreatorProfile).filter(
+        CreatorProfile.user_id == current_user.id
+    ).first()
+    
+    if not creator_profile or not creator_profile.stripe_connect_account_id:
+        return {
+            "connected": False,
+            "onboarding_complete": False,
+            "account_id": None
+        }
+    
+    try:
+        # Check account status with Stripe
+        import stripe
+        account = stripe.Account.retrieve(creator_profile.stripe_connect_account_id)
+        
+        return {
+            "connected": True,
+            "onboarding_complete": account.details_submitted and account.charges_enabled,
+            "account_id": creator_profile.stripe_connect_account_id,
+            "charges_enabled": account.charges_enabled,
+            "details_submitted": account.details_submitted,
+            "requirements": account.requirements
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking Stripe status: {str(e)}")
+        return {
+            "connected": False,
+            "onboarding_complete": False,
+            "account_id": creator_profile.stripe_connect_account_id,
+            "error": str(e)
+        }
+
+
 # Add alias endpoint for frontend compatibility
 @router.post("/stripe/connect")
 async def stripe_connect_alias(

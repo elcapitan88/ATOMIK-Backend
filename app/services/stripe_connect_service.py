@@ -343,6 +343,56 @@ class StripeConnectService:
             logger.error(f"Error calculating platform fee: {str(e)}")
             raise
     
+    async def create_account_session(
+        self,
+        account_id: str,
+        creator_profile: Optional[CreatorProfile] = None
+    ) -> Dict[str, Any]:
+        """
+        Create an Account Session for Stripe Embedded Components.
+        This enables in-app onboarding without redirects.
+        """
+        try:
+            # Prepare account session data
+            session_data = {
+                "account": account_id,
+                "components": {
+                    "account_onboarding": {
+                        "enabled": True,
+                        "features": {
+                            "external_account_collection": True,
+                            "tos_acceptance": True,
+                            "account_management": True
+                        }
+                    },
+                    "account_management": {
+                        "enabled": True,
+                        "features": {
+                            "external_account_collection": True,
+                            "tos_acceptance": True
+                        }
+                    }
+                }
+            }
+            
+            # Create the account session
+            account_session = stripe.AccountSession.create(**session_data)
+            
+            logger.info(f"Created account session for Stripe account {account_id}")
+            
+            return {
+                "client_secret": account_session.client_secret,
+                "account_id": account_id,
+                "expires_at": account_session.expires_at
+            }
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error creating account session: {str(e)}")
+            raise Exception(f"Failed to create account session: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error creating account session: {str(e)}")
+            raise
+
     async def _handle_account_updated(self, event_data: Dict[str, Any]) -> None:
         """Handle account.updated webhook."""
         # Implementation for account updates
