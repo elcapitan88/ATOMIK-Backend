@@ -254,8 +254,8 @@ except ImportError:
 
 app = FastAPI(**app_kwargs)
 
-# Add CSP middleware first
-app.middleware("http")(CSPMiddleware(app))
+# Add CSP middleware first - DISABLED: Using frontend CSP meta tag instead to avoid conflicts
+# app.middleware("http")(CSPMiddleware(app))
 
 # Maintenance Mode Middleware
 class MaintenanceModeMiddleware:
