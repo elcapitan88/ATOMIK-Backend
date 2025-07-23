@@ -364,10 +364,24 @@ async def create_account_session(
         ).with_for_update().first()
         
         if not creator_profile:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Creator profile not found"
+            # Auto-create a basic creator profile if it doesn't exist
+            # This handles cases where onboarding_step was set manually
+            logger.info(f"Creator profile not found for user {current_user.id}, creating one...")
+            from app.services.creator_service import CreatorService
+            from app.schemas.creator import CreatorProfileCreate
+            
+            creator_service = CreatorService()
+            creator_data = CreatorProfileCreate(
+                bio="Trading enthusiast",
+                trading_experience="intermediate"
             )
+            
+            creator_profile = await creator_service.create_creator_profile(
+                db=db,
+                user_id=current_user.id,
+                creator_data=creator_data
+            )
+            logger.info(f"Auto-created creator profile {creator_profile.id} for user {current_user.id}")
         
         # Create or get existing Stripe Connect account (with transaction safety)
         if not creator_profile.stripe_connect_account_id:
