@@ -78,8 +78,8 @@ async def update_onboarding_step(
         db.flush()
         db.commit()
         
-        # Refresh the user object to verify the update
-        db.refresh(user)
+        # Re-query instead of refresh to ensure we get the updated values
+        user = db.query(User).filter(User.id == user.id).first()
         
         logger.info(f"[DEBUG] After update - step: {user.onboarding_step}, data: {user.onboarding_data}")
         logger.info(f"Updated onboarding step to {step} for user {user.id}")
@@ -130,7 +130,9 @@ async def debug_onboarding_test(
         # Force flush and commit
         db.flush()
         db.commit()
-        db.refresh(user)
+        
+        # Re-query instead of refresh to ensure we get the updated values
+        user = db.query(User).filter(User.id == user.id).first()
         
         # Check if it actually updated
         logger.info(f"[DEBUG TEST] After update - step: {user.onboarding_step}, data: {user.onboarding_data}")
