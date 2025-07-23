@@ -357,24 +357,29 @@ async def create_account_session(
     Create an Account Session for Stripe Embedded Components.
     This enables in-app Stripe onboarding without redirects.
     """
-    creator_profile = db.query(CreatorProfile).filter(
-        CreatorProfile.user_id == current_user.id
-    ).first()
-    
-    if not creator_profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Creator profile not found"
-        )
-    
     try:
-        # Create or get existing Stripe Connect account
+        # Use database row-level locking to prevent race condition
+        creator_profile = db.query(CreatorProfile).filter(
+            CreatorProfile.user_id == current_user.id
+        ).with_for_update().first()
+        
+        if not creator_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Creator profile not found"
+            )
+        
+        # Create or get existing Stripe Connect account (with transaction safety)
         if not creator_profile.stripe_connect_account_id:
+            logger.info(f"Creating new Stripe account for creator {creator_profile.id}")
             account_id = await stripe_connect_service.create_express_account(
                 creator_profile=creator_profile
             )
             creator_profile.stripe_connect_account_id = account_id
             db.commit()
+            logger.info(f"Stripe account {account_id} saved for creator {creator_profile.id}")
+        else:
+            logger.info(f"Using existing Stripe account {creator_profile.stripe_connect_account_id} for creator {creator_profile.id}")
         
         # Create account session for embedded components
         account_session = await stripe_connect_service.create_account_session(
@@ -385,11 +390,59 @@ async def create_account_session(
         logger.info(f"Account session created for creator {creator_profile.id}")
         return account_session
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logger.error(f"Error creating account session: {str(e)}")
+        db.rollback()  # Rollback on any error
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create account session"
+        )
+
+
+@router.post("/cleanup-duplicate-accounts")
+async def cleanup_duplicate_accounts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Clean up duplicate Stripe accounts for a creator.
+    This should only be called in development/testing.
+    """
+    try:
+        creator_profile = db.query(CreatorProfile).filter(
+            CreatorProfile.user_id == current_user.id
+        ).first()
+        
+        if not creator_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Creator profile not found"
+            )
+        
+        # If no Stripe account is set, we can't clean up
+        if not creator_profile.stripe_connect_account_id:
+            return {"message": "No Stripe account to clean up"}
+        
+        # Use the first account that was created
+        account_to_keep = creator_profile.stripe_connect_account_id
+        
+        logger.info(f"Keeping Stripe account {account_to_keep} for creator {creator_profile.id}")
+        logger.warning("Note: Any duplicate accounts must be manually deleted from Stripe dashboard")
+        
+        return {
+            "message": "Cleanup completed",
+            "stripe_account_id": account_to_keep,
+            "note": "Duplicate accounts (if any) should be manually removed from Stripe dashboard"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cleanup duplicate accounts"
         )
 
 
