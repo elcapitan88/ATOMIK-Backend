@@ -1,4 +1,5 @@
 #main.py
+# Test change for Railway deployment - Updated: 2025-07-23
 from sqlalchemy.orm import Session
 from app.core.security import get_user_from_token
 from app.models.subscription import Subscription
