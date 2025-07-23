@@ -59,27 +59,35 @@ async def update_onboarding_step(
         step = request_data.get("step")
         data = request_data.get("data")
         
-        logger.info(f"[DEBUG] Updating onboarding for user {current_user.id}")
-        logger.info(f"[DEBUG] Current values - step: {current_user.onboarding_step}, data: {current_user.onboarding_data}")
+        # Re-query the user to ensure it's attached to this session
+        user = db.query(User).filter(User.id == current_user.id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        logger.info(f"[DEBUG] Updating onboarding for user {user.id}")
+        logger.info(f"[DEBUG] Current values - step: {user.onboarding_step}, data: {user.onboarding_data}")
         logger.info(f"[DEBUG] New values - step: {step}, data: {data}")
         
-        current_user.onboarding_step = step
-        current_user.onboarding_data = data
+        user.onboarding_step = step
+        user.onboarding_data = data
         
         # Force flush to ensure changes are written
         db.flush()
         db.commit()
         
         # Refresh the user object to verify the update
-        db.refresh(current_user)
+        db.refresh(user)
         
-        logger.info(f"[DEBUG] After update - step: {current_user.onboarding_step}, data: {current_user.onboarding_data}")
-        logger.info(f"Updated onboarding step to {step} for user {current_user.id}")
+        logger.info(f"[DEBUG] After update - step: {user.onboarding_step}, data: {user.onboarding_data}")
+        logger.info(f"Updated onboarding step to {step} for user {user.id}")
         
         return {
             "success": True,
-            "onboarding_step": current_user.onboarding_step,
-            "onboarding_data": current_user.onboarding_data
+            "onboarding_step": user.onboarding_step,
+            "onboarding_data": user.onboarding_data
         }
         
     except Exception as e:
@@ -100,27 +108,32 @@ async def debug_onboarding_test(
     Debug endpoint to test onboarding step updates
     """
     try:
-        # Get current state
-        current_step = current_user.onboarding_step
-        current_data = current_user.onboarding_data
+        # Re-query the user to ensure it's attached to this session
+        user = db.query(User).filter(User.id == current_user.id).first()
+        if not user:
+            return {"error": "User not found in database"}
         
-        logger.info(f"[DEBUG TEST] Testing onboarding update for user {current_user.id}")
+        # Get current state
+        current_step = user.onboarding_step
+        current_data = user.onboarding_data
+        
+        logger.info(f"[DEBUG TEST] Testing onboarding update for user {user.id}")
         logger.info(f"[DEBUG TEST] Current values - step: {current_step}, data: {current_data}")
         
         # Try to update to step 2
         test_step = 2
         test_data = {"test": "debug_endpoint", "timestamp": str(datetime.utcnow())}
         
-        current_user.onboarding_step = test_step
-        current_user.onboarding_data = test_data
+        user.onboarding_step = test_step
+        user.onboarding_data = test_data
         
         # Force flush and commit
         db.flush()
         db.commit()
-        db.refresh(current_user)
+        db.refresh(user)
         
         # Check if it actually updated
-        logger.info(f"[DEBUG TEST] After update - step: {current_user.onboarding_step}, data: {current_user.onboarding_data}")
+        logger.info(f"[DEBUG TEST] After update - step: {user.onboarding_step}, data: {user.onboarding_data}")
         
         # Query the database directly to double-check
         from sqlalchemy import text
