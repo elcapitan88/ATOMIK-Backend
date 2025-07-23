@@ -526,13 +526,33 @@ async def get_stripe_status(
         import stripe
         account = stripe.Account.retrieve(creator_profile.stripe_connect_account_id)
         
+        # Check if onboarding is truly complete
+        # Stripe onboarding is complete when:
+        # 1. Details are submitted 
+        # 2. No currently_due requirements (including TOS)
+        # 3. Payouts are enabled (final indicator)
+        onboarding_complete = (
+            account.details_submitted and 
+            len(account.requirements.currently_due) == 0 and
+            account.payouts_enabled
+        )
+        
+        # If charges are enabled but payouts aren't, it might just be processing
+        if account.charges_enabled and not account.payouts_enabled:
+            # Check if only TOS is missing
+            currently_due = account.requirements.currently_due
+            if all(req.startswith('tos_acceptance') for req in currently_due):
+                onboarding_complete = True  # Consider it complete if only TOS is pending
+        
         return {
             "connected": True,
-            "onboarding_complete": account.details_submitted and account.charges_enabled,
+            "onboarding_complete": onboarding_complete,
             "account_id": creator_profile.stripe_connect_account_id,
             "charges_enabled": account.charges_enabled,
+            "payouts_enabled": account.payouts_enabled,
             "details_submitted": account.details_submitted,
-            "requirements": account.requirements
+            "requirements": account.requirements,
+            "tos_accepted": account.tos_acceptance.date is not None
         }
         
     except Exception as e:
