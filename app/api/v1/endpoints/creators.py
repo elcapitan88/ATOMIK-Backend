@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
-from datetime import datetime
 
 from app.api import deps
 from app.core.security import get_current_user
@@ -67,10 +66,6 @@ async def update_onboarding_step(
                 detail="User not found"
             )
         
-        logger.info(f"[DEBUG] Updating onboarding for user {user.id}")
-        logger.info(f"[DEBUG] Current values - step: {user.onboarding_step}, data: {user.onboarding_data}")
-        logger.info(f"[DEBUG] New values - step: {step}, data: {data}")
-        
         user.onboarding_step = step
         user.onboarding_data = data
         
@@ -81,7 +76,6 @@ async def update_onboarding_step(
         # Re-query instead of refresh to ensure we get the updated values
         user = db.query(User).filter(User.id == user.id).first()
         
-        logger.info(f"[DEBUG] After update - step: {user.onboarding_step}, data: {user.onboarding_data}")
         logger.info(f"Updated onboarding step to {step} for user {user.id}")
         
         return {
@@ -98,92 +92,6 @@ async def update_onboarding_step(
             detail="Failed to update onboarding step"
         )
 
-
-@router.get("/debug-onboarding-test")
-async def debug_onboarding_test(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Debug endpoint to test onboarding step updates
-    """
-    try:
-        # Re-query the user to ensure it's attached to this session
-        user = db.query(User).filter(User.id == current_user.id).first()
-        if not user:
-            return {"error": "User not found in database"}
-        
-        # Get current state
-        current_step = user.onboarding_step
-        current_data = user.onboarding_data
-        
-        logger.info(f"[DEBUG TEST] Testing onboarding update for user {user.id}")
-        logger.info(f"[DEBUG TEST] Current values - step: {current_step}, data: {current_data}")
-        
-        # Try to update to step 2
-        test_step = 2
-        test_data = {"test": "debug_endpoint", "timestamp": str(datetime.utcnow())}
-        
-        user.onboarding_step = test_step
-        user.onboarding_data = test_data
-        
-        # Force flush and commit
-        db.flush()
-        db.commit()
-        
-        # Re-query instead of refresh to ensure we get the updated values
-        user = db.query(User).filter(User.id == user.id).first()
-        
-        # Check if it actually updated
-        logger.info(f"[DEBUG TEST] After update - step: {user.onboarding_step}, data: {user.onboarding_data}")
-        
-        # Query the database directly to double-check
-        from sqlalchemy import text
-        result = db.execute(text("""
-            SELECT onboarding_step, onboarding_data 
-            FROM users 
-            WHERE id = :user_id
-        """), {"user_id": current_user.id})
-        
-        row = result.fetchone()
-        db_step = row[0] if row else None
-        db_data = row[1] if row else None
-        
-        logger.info(f"[DEBUG TEST] Direct DB query - step: {db_step}, data: {db_data}")
-        
-        success = db_step == test_step
-        
-        return {
-            "debug_test": True,
-            "user_id": current_user.id,
-            "before": {
-                "step": current_step,
-                "data": current_data
-            },
-            "attempted_update": {
-                "step": test_step,
-                "data": test_data
-            },
-            "after_orm": {
-                "step": current_user.onboarding_step,
-                "data": current_user.onboarding_data
-            },
-            "after_direct_query": {
-                "step": db_step,
-                "data": db_data
-            },
-            "success": success,
-            "message": "Update successful!" if success else "Update failed - database not persisting changes"
-        }
-        
-    except Exception as e:
-        logger.error(f"[DEBUG TEST] Error: {str(e)}")
-        import traceback
-        logger.error(f"[DEBUG TEST] Traceback: {traceback.format_exc()}")
-        return {
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
 
 
 @router.post("/complete-onboarding")
