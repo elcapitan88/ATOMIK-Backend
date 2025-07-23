@@ -22,7 +22,7 @@ class StripeConnectService:
         
     async def create_express_account(self, creator_profile: CreatorProfile) -> str:
         """
-        Create a Stripe Express account for a creator.
+        Create a Stripe Express account for a creator with embedded components support.
         """
         try:
             account = stripe.Account.create(
@@ -34,6 +34,13 @@ class StripeConnectService:
                     "transfers": {"requested": True},
                 },
                 business_type="individual",  # Default to individual
+                # Set requirement collection to application for embedded components
+                controller={
+                    "requirement_collection": "application",
+                    "stripe_dashboard": {
+                        "type": "express"
+                    }
+                },
                 metadata={
                     "creator_id": str(creator_profile.id),
                     "user_id": str(creator_profile.user_id),

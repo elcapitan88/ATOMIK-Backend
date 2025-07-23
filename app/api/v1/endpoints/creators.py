@@ -393,7 +393,34 @@ async def create_account_session(
             db.commit()
             logger.info(f"Stripe account {account_id} saved for creator {creator_profile.id}")
         else:
-            logger.info(f"Using existing Stripe account {creator_profile.stripe_connect_account_id} for creator {creator_profile.id}")
+            # Check if existing account has correct requirement_collection setting
+            try:
+                import stripe
+                existing_account = stripe.Account.retrieve(creator_profile.stripe_connect_account_id)
+                requirement_collection = existing_account.controller.requirement_collection
+                
+                if requirement_collection != "application":
+                    logger.info(f"Existing account has requirement_collection={requirement_collection}, need to recreate for embedded components")
+                    # Delete old account and create new one
+                    try:
+                        stripe.Account.delete(creator_profile.stripe_connect_account_id)
+                        logger.info(f"Deleted old Stripe account {creator_profile.stripe_connect_account_id}")
+                    except Exception as delete_error:
+                        logger.warning(f"Could not delete old account: {delete_error}")
+                    
+                    # Create new account with correct settings
+                    account_id = await stripe_connect_service.create_express_account(
+                        creator_profile=creator_profile
+                    )
+                    creator_profile.stripe_connect_account_id = account_id
+                    db.commit()
+                    logger.info(f"Created new Stripe account {account_id} with embedded support")
+                else:
+                    logger.info(f"Using existing Stripe account {creator_profile.stripe_connect_account_id} for creator {creator_profile.id}")
+                    
+            except Exception as check_error:
+                logger.warning(f"Could not check existing account settings: {check_error}")
+                logger.info(f"Using existing Stripe account {creator_profile.stripe_connect_account_id} for creator {creator_profile.id}")
         
         # Create account session for embedded components
         account_session = await stripe_connect_service.create_account_session(
