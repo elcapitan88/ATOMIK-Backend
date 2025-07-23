@@ -353,13 +353,17 @@ class StripeConnectService:
         This enables in-app onboarding without redirects.
         """
         try:
-            # Prepare account session data with valid features only
+            # Prepare account session data with embedded onboarding configuration
             session_data = {
                 "account": account_id,
                 "components": {
                     "account_onboarding": {
                         "enabled": True,
                         "features": {
+                            # Disable Stripe user authentication to enable fully embedded onboarding
+                            # Note: This means we take responsibility for account security
+                            "disable_stripe_user_authentication": True,
+                            # Still collect external account information
                             "external_account_collection": True
                         }
                     }
