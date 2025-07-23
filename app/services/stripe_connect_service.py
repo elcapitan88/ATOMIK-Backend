@@ -36,8 +36,14 @@ class StripeConnectService:
                 # Set requirement collection to application for embedded components
                 controller={
                     "requirement_collection": "application",
+                    "losses": {
+                        "payments": "application"
+                    },
+                    "fees": {
+                        "payer": "application"
+                    },
                     "stripe_dashboard": {
-                        "type": "express"
+                        "type": "none"
                     }
                 },
                 metadata={
