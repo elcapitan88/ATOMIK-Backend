@@ -26,7 +26,6 @@ class StripeConnectService:
         """
         try:
             account = stripe.Account.create(
-                type="express",
                 country="US",  # Default to US, can be made configurable
                 email=creator_profile.user.email if creator_profile.user else None,
                 capabilities={
