@@ -10,10 +10,11 @@ logger = logging.getLogger(__name__)
 # Configure database engine with proper error handling
 try:
     # Debug: Log the actual database URL being used
-    logger.info(f"Connecting to database: {settings.DATABASE_URL[:50]}...")
+    active_db_url = settings.active_database_url
+    logger.info(f"Connecting to database: {active_db_url[:50]}...")
     engine = create_engine(
-        settings.DATABASE_URL,
-        connect_args={"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {},
+        active_db_url,
+        connect_args={"check_same_thread": False} if active_db_url.startswith("sqlite") else {},
         poolclass=QueuePool,
         pool_size=5,
         max_overflow=10,

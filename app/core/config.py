@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
         
     # Database Settings
-    DATABASE_URL: str
+    DATABASE_URL: str = ""
     DEV_DATABASE_URL: str = ""  
     PROD_DATABASE_URL: str = ""
     SQL_ECHO: bool = False 
@@ -79,6 +79,10 @@ class Settings(BaseSettings):
             return self.PROD_DATABASE_URL
         elif self.ENVIRONMENT == "development" and self.DEV_DATABASE_URL:
             return self.DEV_DATABASE_URL
+        
+        # Ensure we have a database URL
+        if not self.DATABASE_URL:
+            raise ValueError("No database URL configured. Set DATABASE_URL, DEV_DATABASE_URL, or PROD_DATABASE_URL")
         return self.DATABASE_URL
     
     def _get_railway_internal_url(self) -> Optional[str]:
@@ -318,14 +322,14 @@ def get_settings() -> Settings:
 # Create settings instance
 settings = get_settings()
 
-# Debug: Log the DATABASE_URL at config initialization
+# Debug: Log the active database URL at config initialization
 import logging
 logger = logging.getLogger(__name__)
-logger.info(f"[CONFIG] DATABASE_URL: {settings.DATABASE_URL[:50] if settings.DATABASE_URL else 'NONE'}...")
+logger.info(f"[CONFIG] Active Database URL: {settings.active_database_url[:50]}...")
 
 # Validate critical settings on import
 assert settings.SECRET_KEY, "SECRET_KEY environment variable is required"
-assert settings.DATABASE_URL, "DATABASE_URL environment variable is required"
+# DATABASE_URL validation is now handled in active_database_url property
 assert settings.STRIPE_SECRET_KEY, "STRIPE_SECRET_KEY environment variable is required"
 assert settings.STRIPE_WEBHOOK_SECRET, "STRIPE_WEBHOOK_SECRET environment variable is required"
 assert settings.STRIPE_PUBLIC_KEY, "STRIPE_PUBLIC_KEY environment variable is required"
