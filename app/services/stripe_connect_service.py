@@ -382,6 +382,8 @@ class StripeConnectService:
                 }
             }
             
+            logger.info(f"Creating account session with config: {session_data}")
+            
             # Create the account session
             account_session = stripe.AccountSession.create(**session_data)
             
