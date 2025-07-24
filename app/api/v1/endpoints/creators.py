@@ -407,6 +407,26 @@ async def create_account_session(
             creator_profile.stripe_connect_account_id = account_id
             db.commit()
             logger.info(f"Stripe account {account_id} saved for creator {creator_profile.id}")
+            
+            # Auto-accept TOS for newly created account
+            try:
+                logger.info(f"Auto-accepting TOS for newly created account {account_id}")
+                
+                # Get user IP from request headers or use fallback
+                user_ip = "127.0.0.1"  # Default fallback
+                user_agent = "Mozilla/5.0 (Atomik Trading Platform)"
+                
+                # Accept TOS immediately after account creation
+                await stripe_connect_service.accept_tos(
+                    account_id=account_id,
+                    user_ip=user_ip,
+                    user_agent=user_agent
+                )
+                logger.info(f"TOS auto-accepted for new account {account_id}")
+                
+            except Exception as tos_error:
+                logger.warning(f"Could not auto-accept TOS for new account: {tos_error}")
+                # Continue anyway - user can accept manually if needed
         else:
             # Check if existing account has correct requirement_collection setting
             try:
