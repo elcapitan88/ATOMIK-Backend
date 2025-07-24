@@ -502,6 +502,53 @@ async def cleanup_duplicate_accounts(
         )
 
 
+@router.post("/accept-tos")
+async def accept_stripe_tos(
+    request_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Accept Terms of Service for Stripe Connect account.
+    """
+    try:
+        creator_profile = db.query(CreatorProfile).filter(
+            CreatorProfile.user_id == current_user.id
+        ).first()
+        
+        if not creator_profile or not creator_profile.stripe_connect_account_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Creator profile or Stripe account not found"
+            )
+        
+        # Get user IP from request
+        user_ip = request_data.get("user_ip", "127.0.0.1")  # Default fallback
+        user_agent = request_data.get("user_agent")
+        
+        # Accept TOS using Stripe service
+        result = await stripe_connect_service.accept_tos(
+            account_id=creator_profile.stripe_connect_account_id,
+            user_ip=user_ip,
+            user_agent=user_agent
+        )
+        
+        logger.info(f"TOS accepted for creator {creator_profile.id}, Stripe account {creator_profile.stripe_connect_account_id}")
+        
+        return {
+            "success": True,
+            "message": "Terms of Service accepted successfully",
+            **result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error accepting TOS: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to accept Terms of Service"
+        )
+
+
 @router.get("/stripe-status")
 async def get_stripe_status(
     db: Session = Depends(get_db),

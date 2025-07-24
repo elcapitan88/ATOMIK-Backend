@@ -402,6 +402,52 @@ class StripeConnectService:
             logger.error(f"Error creating account session: {str(e)}")
             raise
 
+    async def accept_tos(
+        self,
+        account_id: str,
+        user_ip: str,
+        user_agent: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Accept Terms of Service for a Stripe Connect account.
+        This is required for accounts with disabled Stripe user authentication.
+        """
+        try:
+            import time
+            
+            # Prepare TOS acceptance data
+            tos_data = {
+                "tos_acceptance": {
+                    "date": int(time.time()),  # Current timestamp
+                    "ip": user_ip
+                }
+            }
+            
+            # Add user agent if provided
+            if user_agent:
+                tos_data["tos_acceptance"]["user_agent"] = user_agent
+            
+            logger.info(f"Accepting TOS for account {account_id} from IP {user_ip}")
+            
+            # Update the account with TOS acceptance
+            account = stripe.Account.modify(account_id, **tos_data)
+            
+            logger.info(f"TOS accepted for account {account_id}")
+            
+            return {
+                "tos_accepted": account.tos_acceptance.date is not None,
+                "tos_date": account.tos_acceptance.date,
+                "tos_ip": account.tos_acceptance.ip,
+                "account_id": account_id
+            }
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error accepting TOS: {str(e)}")
+            raise Exception(f"Failed to accept TOS: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error accepting TOS: {str(e)}")
+            raise
+
     async def _handle_account_updated(self, event_data: Dict[str, Any]) -> None:
         """Handle account.updated webhook."""
         # Implementation for account updates
