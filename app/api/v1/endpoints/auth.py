@@ -370,10 +370,10 @@ async def verify_token(current_user: User = Depends(get_current_user), db: Sessi
             if user_with_profile:
                 logger.info(f"Debug: creator_profile exists: {user_with_profile.creator_profile is not None}")
                 if user_with_profile.creator_profile:
-                    logger.info(f"Debug: creator_profile data: id={user_with_profile.creator_profile.id}, stripe_account_id={user_with_profile.creator_profile.stripe_account_id}, is_verified={user_with_profile.creator_profile.is_verified}")
+                    logger.info(f"Debug: creator_profile data: id={user_with_profile.creator_profile.id}, stripe_connect_account_id={user_with_profile.creator_profile.stripe_connect_account_id}, is_verified={user_with_profile.creator_profile.is_verified}")
                     creator_profile_data = {
                         "id": user_with_profile.creator_profile.id,
-                        "stripe_account_id": user_with_profile.creator_profile.stripe_account_id,
+                        "stripe_account_id": user_with_profile.creator_profile.stripe_connect_account_id,
                         "is_verified": user_with_profile.creator_profile.is_verified
                     }
         except Exception as e:
