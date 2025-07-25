@@ -20,6 +20,11 @@ class StrategyType(str, Enum):
     ARBITRAGE = "arbitrage"
     SCALPING = "scalping"
 
+class UsageIntent(str, Enum):
+    PERSONAL = "personal"
+    SHARE_FREE = "share_free"
+    MONETIZE = "monetize"
+
 class WebhookPayload(BaseModel):
     action: WebhookAction
 
@@ -41,6 +46,7 @@ class WebhookBase(BaseModel):
     max_retries: Optional[int] = Field(default=3, gt=0)
     strategy_type: Optional[StrategyType] = None
     is_shared: Optional[bool] = False
+    usage_intent: Optional[UsageIntent] = UsageIntent.PERSONAL
 
 class WebhookCreate(WebhookBase):
     pass
@@ -126,6 +132,7 @@ class WebhookCreateResponse(WebhookBase):
     secret_key: str  # Only exposed during creation
     is_active: bool
     is_shared: bool = False
+    usage_intent: Optional[UsageIntent] = UsageIntent.PERSONAL
     created_at: datetime
     last_triggered: Optional[datetime] = None  
     webhook_url: str

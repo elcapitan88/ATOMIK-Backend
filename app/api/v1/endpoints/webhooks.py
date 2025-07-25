@@ -67,6 +67,10 @@ async def generate_webhook(
         
         # Resource limit check is already handled by @check_resource_limit decorator
 
+        # Determine sharing settings based on usage intent
+        usage_intent = webhook_in.usage_intent or 'personal'
+        is_shared = usage_intent == 'share_free'
+        
         # Create webhook
         webhook = Webhook(
             user_id=current_user.id,
@@ -79,6 +83,10 @@ async def generate_webhook(
             max_triggers_per_minute=webhook_in.max_triggers_per_minute or 60,
             require_signature=webhook_in.require_signature if webhook_in.require_signature is not None else True,
             max_retries=webhook_in.max_retries or 3,
+            strategy_type=webhook_in.strategy_type,
+            usage_intent=usage_intent,
+            is_shared=is_shared,
+            sharing_enabled_at=datetime.utcnow() if is_shared else None,
             is_active=True,
             created_at=datetime.utcnow()
         )
@@ -95,6 +103,10 @@ async def generate_webhook(
         
         db.commit()
         db.refresh(webhook)
+        
+        # Log automatic sharing for share_free strategies
+        if is_shared:
+            logger.info(f"Strategy '{webhook.name}' (ID: {webhook.id}) automatically shared to marketplace due to 'share_free' intent")
 
         # Create webhook URLs
         webhook_url = generate_webhook_url(webhook)
@@ -113,6 +125,9 @@ async def generate_webhook(
             max_triggers_per_minute=webhook.max_triggers_per_minute,
             require_signature=webhook.require_signature,
             max_retries=webhook.max_retries,
+            strategy_type=webhook.strategy_type,
+            usage_intent=webhook.usage_intent,
+            is_shared=webhook.is_shared,
             is_active=webhook.is_active,
             created_at=webhook.created_at,
             last_triggered=webhook.last_triggered,
