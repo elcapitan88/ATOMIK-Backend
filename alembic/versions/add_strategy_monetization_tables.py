@@ -52,6 +52,8 @@ def upgrade() -> None:
         sa.Column('billing_interval', sa.String(20), nullable=True),  # 'month'|'year'|NULL for one-time
         sa.Column('trial_period_days', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('subscriber_count', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('total_revenue', sa.Numeric(12, 2), nullable=False, server_default='0.00'),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.text('NOW()')),
         sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.text('NOW()'))
     )

@@ -107,6 +107,14 @@ class Webhook(Base):
         back_populates="webhook",
         cascade="all, delete-orphan"
     )
+    
+    # Phase 3: Dynamic monetization relationship
+    strategy_monetization = relationship(
+        "StrategyMonetization",
+        back_populates="webhook",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

@@ -467,3 +467,311 @@ class StripeConnectService:
         """Handle customer.subscription.deleted webhook."""
         # Implementation for subscription cancellations
         pass
+    
+    # ===== PHASE 3: Dynamic Stripe Integration Methods =====
+    
+    async def create_strategy_product(
+        self,
+        strategy_name: str,
+        strategy_description: str,
+        stripe_account_id: str,
+        metadata: Dict[str, str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe Product for a strategy automatically.
+        This replaces manual product creation in Stripe dashboard.
+        """
+        try:
+            product_data = {
+                "name": f"Strategy: {strategy_name}",
+                "description": strategy_description or f"Access to {strategy_name} trading strategy",
+                "type": "service",
+                "metadata": {
+                    "strategy_name": strategy_name,
+                    "product_type": "strategy_access",
+                    **(metadata or {})
+                }
+            }
+            
+            product = stripe.Product.create(
+                **product_data,
+                stripe_account=stripe_account_id
+            )
+            
+            logger.info(f"Created Stripe product {product.id} for strategy '{strategy_name}' on account {stripe_account_id}")
+            return product
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error creating strategy product: {str(e)}")
+            raise Exception(f"Failed to create strategy product: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error creating strategy product: {str(e)}")
+            raise
+    
+    async def create_strategy_price(
+        self,
+        product_id: str,
+        amount: float,
+        currency: str = 'usd',
+        billing_interval: Optional[str] = None,
+        trial_period_days: int = 0,
+        stripe_account_id: str = None,
+        metadata: Dict[str, str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe Price for a strategy product.
+        Supports both subscription and one-time pricing.
+        """
+        try:
+            # Convert amount to cents for Stripe
+            amount_cents = int(float(amount) * 100)
+            
+            price_data = {
+                "unit_amount": amount_cents,
+                "currency": currency.lower(),
+                "product": product_id,
+                "metadata": {
+                    "price_type": billing_interval or "one_time",
+                    "trial_days": str(trial_period_days),
+                    **(metadata or {})
+                }
+            }
+            
+            # Add recurring configuration for subscriptions
+            if billing_interval in ['month', 'year']:
+                price_data["recurring"] = {
+                    "interval": billing_interval,
+                    "trial_period_days": trial_period_days if trial_period_days > 0 else None
+                }
+                
+                # Remove None values from recurring config
+                price_data["recurring"] = {k: v for k, v in price_data["recurring"].items() if v is not None}
+            
+            price = stripe.Price.create(
+                **price_data,
+                stripe_account=stripe_account_id
+            )
+            
+            logger.info(f"Created Stripe price {price.id} for ${amount} {billing_interval or 'one-time'} on account {stripe_account_id}")
+            return price
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error creating strategy price: {str(e)}")
+            raise Exception(f"Failed to create strategy price: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error creating strategy price: {str(e)}")
+            raise
+    
+    async def create_subscription_price(
+        self,
+        product_id: str,
+        amount: float,
+        interval: str,
+        currency: str = 'usd',
+        trial_period_days: int = 0,
+        stripe_account_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Create a subscription price with trial support.
+        """
+        return await self.create_strategy_price(
+            product_id=product_id,
+            amount=amount,
+            currency=currency,
+            billing_interval=interval,
+            trial_period_days=trial_period_days,
+            stripe_account_id=stripe_account_id,
+            metadata={"price_category": "subscription"}
+        )
+    
+    async def create_one_time_price(
+        self,
+        product_id: str,
+        amount: float,
+        currency: str = 'usd',
+        stripe_account_id: str = None,
+        price_type: str = 'lifetime'
+    ) -> Dict[str, Any]:
+        """
+        Create a one-time payment price (lifetime access, setup fee, etc.).
+        """
+        return await self.create_strategy_price(
+            product_id=product_id,
+            amount=amount,
+            currency=currency,
+            billing_interval=None,
+            trial_period_days=0,
+            stripe_account_id=stripe_account_id,
+            metadata={"price_category": "one_time", "price_type": price_type}
+        )
+    
+    async def update_strategy_pricing(
+        self,
+        old_price_id: str,
+        product_id: str,
+        new_amount: float,
+        billing_interval: Optional[str] = None,
+        trial_period_days: int = 0,
+        stripe_account_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Update strategy pricing by creating new price and deactivating old one.
+        Stripe doesn't allow price updates, so we create new and deactivate old.
+        """
+        try:
+            # Create new price
+            new_price = await self.create_strategy_price(
+                product_id=product_id,
+                amount=new_amount,
+                billing_interval=billing_interval,
+                trial_period_days=trial_period_days,
+                stripe_account_id=stripe_account_id
+            )
+            
+            # Deactivate old price
+            await self.deactivate_price(old_price_id, stripe_account_id)
+            
+            logger.info(f"Updated pricing: new price {new_price.id}, deactivated {old_price_id}")
+            return new_price
+            
+        except Exception as e:
+            logger.error(f"Error updating strategy pricing: {str(e)}")
+            raise
+    
+    async def deactivate_price(
+        self,
+        price_id: str,
+        stripe_account_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Deactivate a Stripe price (set active=False).
+        """
+        try:
+            price = stripe.Price.modify(
+                price_id,
+                active=False,
+                stripe_account=stripe_account_id
+            )
+            
+            logger.info(f"Deactivated Stripe price {price_id}")
+            return price
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error deactivating price: {str(e)}")
+            raise Exception(f"Failed to deactivate price: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error deactivating price: {str(e)}")
+            raise
+    
+    async def delete_product(
+        self,
+        product_id: str,
+        stripe_account_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Delete a Stripe product (used for cleanup on failed monetization setup).
+        """
+        try:
+            product = stripe.Product.modify(
+                product_id,
+                active=False,
+                stripe_account=stripe_account_id
+            )
+            
+            logger.info(f"Deleted Stripe product {product_id}")
+            return product
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error deleting product: {str(e)}")
+            raise Exception(f"Failed to delete product: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error deleting product: {str(e)}")
+            raise
+    
+    async def get_product_prices(
+        self,
+        product_id: str,
+        stripe_account_id: str = None,
+        active_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all prices for a product.
+        """
+        try:
+            params = {
+                "product": product_id,
+                "limit": 100
+            }
+            
+            if active_only:
+                params["active"] = True
+            
+            prices = stripe.Price.list(
+                **params,
+                stripe_account=stripe_account_id
+            )
+            
+            return prices.data
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error getting product prices: {str(e)}")
+            raise Exception(f"Failed to get product prices: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error getting product prices: {str(e)}")
+            raise
+    
+    def calculate_application_fee(
+        self,
+        amount: float,
+        fee_percentage: float = 15.0
+    ) -> float:
+        """
+        Calculate application fee for platform revenue.
+        Default 15% platform fee.
+        """
+        return round(amount * (fee_percentage / 100.0), 2)
+    
+    async def create_checkout_session(
+        self,
+        price_id: str,
+        success_url: str,
+        cancel_url: str,
+        customer_email: str = None,
+        stripe_account_id: str = None,
+        metadata: Dict[str, str] = None,
+        application_fee_percent: float = 15.0
+    ) -> Dict[str, Any]:
+        """
+        Create a Stripe Checkout session for strategy purchase.
+        """
+        try:
+            session_data = {
+                "payment_method_types": ["card"],
+                "line_items": [{
+                    "price": price_id,
+                    "quantity": 1,
+                }],
+                "mode": "subscription" if "recurring" in price_id else "payment",
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "application_fee_percent": application_fee_percent,
+                "metadata": metadata or {}
+            }
+            
+            if customer_email:
+                session_data["customer_email"] = customer_email
+            
+            session = stripe.checkout.Session.create(
+                **session_data,
+                stripe_account=stripe_account_id
+            )
+            
+            logger.info(f"Created checkout session {session.id} for price {price_id}")
+            return session
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error creating checkout session: {str(e)}")
+            raise Exception(f"Failed to create checkout session: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error creating checkout session: {str(e)}")
+            raise
