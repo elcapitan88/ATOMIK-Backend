@@ -356,19 +356,25 @@ async def update_profile(
         )
 
 @router.get("/verify", response_model=dict)
-async def verify_token(current_user: User = Depends(get_current_user)):
+async def verify_token(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Verify access token and return user info
     """
     try:
-        # Include creator_profile data if it exists
+        # Manually load creator_profile to avoid 401 issues
         creator_profile_data = None
-        if current_user.creator_profile:
-            creator_profile_data = {
-                "id": current_user.creator_profile.id,
-                "stripe_account_id": current_user.creator_profile.stripe_account_id,
-                "is_verified": current_user.creator_profile.is_verified
-            }
+        try:
+            from sqlalchemy.orm import joinedload
+            user_with_profile = db.query(User).options(joinedload(User.creator_profile)).filter(User.id == current_user.id).first()
+            if user_with_profile and user_with_profile.creator_profile:
+                creator_profile_data = {
+                    "id": user_with_profile.creator_profile.id,
+                    "stripe_account_id": user_with_profile.creator_profile.stripe_account_id,
+                    "is_verified": user_with_profile.creator_profile.is_verified
+                }
+        except Exception as e:
+            logger.warning(f"Could not load creator_profile for user {current_user.id}: {str(e)}")
+            # creator_profile_data remains None
         
         return {
             "valid": True,
