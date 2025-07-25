@@ -361,6 +361,15 @@ async def verify_token(current_user: User = Depends(get_current_user)):
     Verify access token and return user info
     """
     try:
+        # Include creator_profile data if it exists
+        creator_profile_data = None
+        if current_user.creator_profile:
+            creator_profile_data = {
+                "id": current_user.creator_profile.id,
+                "stripe_account_id": current_user.creator_profile.stripe_account_id,
+                "is_verified": current_user.creator_profile.is_verified
+            }
+        
         return {
             "valid": True,
             "user": {
@@ -371,7 +380,8 @@ async def verify_token(current_user: User = Depends(get_current_user)):
                 "phone": current_user.phone,
                 "profile_picture": current_user.profile_picture,
                 "app_role": current_user.app_role or "user",
-                "is_creator": current_user.is_creator()
+                "is_creator": current_user.is_creator(),
+                "creator_profile": creator_profile_data
             }
         }
     except Exception as e:

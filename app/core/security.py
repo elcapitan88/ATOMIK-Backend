@@ -142,8 +142,9 @@ async def get_current_user(
                 logger.warning(f"Token validation failed: invalid token type '{token_type}', expected 'access'")
             raise credentials_exception
             
-        # Get user from database
-        user = db.query(User).filter(User.email == email).first()
+        # Get user from database with creator_profile relationship
+        from sqlalchemy.orm import joinedload
+        user = db.query(User).options(joinedload(User.creator_profile)).filter(User.email == email).first()
         if user is None:
             logger.warning(f"User not found: {email}")
             raise credentials_exception
