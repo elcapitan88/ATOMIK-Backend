@@ -5,7 +5,7 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status, Query, Request
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import logging
@@ -143,8 +143,11 @@ async def get_current_user(
             raise credentials_exception
             
         # Get user from database with creator_profile relationship
-        from sqlalchemy.orm import joinedload
-        user = db.query(User).options(joinedload(User.creator_profile)).filter(User.email == email).first()
+        try:
+            user = db.query(User).options(joinedload(User.creator_profile)).filter(User.email == email).first()
+        except Exception as e:
+            logger.warning(f"Error loading user with creator_profile: {str(e)}, falling back to basic query")
+            user = db.query(User).filter(User.email == email).first()
         if user is None:
             logger.warning(f"User not found: {email}")
             raise credentials_exception
