@@ -366,17 +366,21 @@ async def verify_token(current_user: User = Depends(get_current_user), db: Sessi
         try:
             from sqlalchemy.orm import joinedload
             user_with_profile = db.query(User).options(joinedload(User.creator_profile)).filter(User.id == current_user.id).first()
-            if user_with_profile and user_with_profile.creator_profile:
-                creator_profile_data = {
-                    "id": user_with_profile.creator_profile.id,
-                    "stripe_account_id": user_with_profile.creator_profile.stripe_account_id,
-                    "is_verified": user_with_profile.creator_profile.is_verified
-                }
+            logger.info(f"Debug: user_with_profile found: {user_with_profile is not None}")
+            if user_with_profile:
+                logger.info(f"Debug: creator_profile exists: {user_with_profile.creator_profile is not None}")
+                if user_with_profile.creator_profile:
+                    logger.info(f"Debug: creator_profile data: id={user_with_profile.creator_profile.id}, stripe_account_id={user_with_profile.creator_profile.stripe_account_id}, is_verified={user_with_profile.creator_profile.is_verified}")
+                    creator_profile_data = {
+                        "id": user_with_profile.creator_profile.id,
+                        "stripe_account_id": user_with_profile.creator_profile.stripe_account_id,
+                        "is_verified": user_with_profile.creator_profile.is_verified
+                    }
         except Exception as e:
-            logger.warning(f"Could not load creator_profile for user {current_user.id}: {str(e)}")
+            logger.error(f"Could not load creator_profile for user {current_user.id}: {str(e)}")
             # creator_profile_data remains None
         
-        return {
+        user_response = {
             "valid": True,
             "user": {
                 "id": current_user.id,
@@ -390,6 +394,8 @@ async def verify_token(current_user: User = Depends(get_current_user), db: Sessi
                 "creator_profile": creator_profile_data
             }
         }
+        logger.info(f"Debug: Final response for user {current_user.id}: creator_profile_data={creator_profile_data}")
+        return user_response
     except Exception as e:
         logger.error(f"Token verification error: {str(e)}")
         raise HTTPException(
