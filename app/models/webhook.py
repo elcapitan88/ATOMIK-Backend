@@ -54,6 +54,8 @@ class Webhook(Base):
     rating = Column(Float, default=0.0)
     total_ratings = Column(Integer, default=0)
     is_monetized = Column(Boolean, default=False)  # Whether this strategy has paid pricing
+    usage_intent = Column(String(20), nullable=False, default='personal')  # 'personal'|'share_free'|'monetize'
+    stripe_product_id = Column(String(100), nullable=True)  # For monetized strategies
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -132,7 +134,10 @@ class Webhook(Base):
             'strategy_type': self.strategy_type.value if self.strategy_type else None,
             'is_shared': self.is_shared,
             'subscriber_count': self.subscriber_count,
-            'rating': float(self.rating) if self.rating else 0.0
+            'rating': float(self.rating) if self.rating else 0.0,
+            'usage_intent': self.usage_intent,
+            'stripe_product_id': self.stripe_product_id,
+            'is_monetized': self.is_monetized
         }
 
     def get_configuration(self) -> dict:
