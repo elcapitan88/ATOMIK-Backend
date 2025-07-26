@@ -1,6 +1,6 @@
 # app/services/stripe_connect_service.py
 import stripe
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import logging
 from decimal import Decimal
 
