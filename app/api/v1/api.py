@@ -8,7 +8,7 @@ logger.info("Starting API router imports...")
 
 try:
     from .endpoints import auth, broker, subscription, webhooks, strategy, tradovate, binance, futures_contracts
-    from .endpoints import strategy_monetization
+    from .endpoints import strategy_monetization, creator_analytics
     logger.info("Basic endpoints imported successfully")
     
     from .endpoints import admin
@@ -40,6 +40,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(strategy.router, prefix="/strategies", tags=["strategies"])
 api_router.include_router(strategy_monetization.router, prefix="/strategies", tags=["strategy-monetization"])
+api_router.include_router(creator_analytics.router, prefix="/analytics", tags=["creator-analytics"])
 api_router.include_router(subscription.router, prefix="/subscriptions", tags=["subscriptions"])
 
 # Register admin router with logging

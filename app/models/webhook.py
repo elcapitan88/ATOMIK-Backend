@@ -115,6 +115,9 @@ class Webhook(Base):
         uselist=False,
         cascade="all, delete-orphan"
     )
+    
+    # Analytics relationships (simplified)
+    metrics = relationship("StrategyMetrics", back_populates="strategy", cascade="all, delete-orphan")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

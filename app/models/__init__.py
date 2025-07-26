@@ -12,6 +12,8 @@ from .creator_profile import CreatorProfile
 from .strategy_pricing import StrategyPricing, PricingType, BillingInterval
 from .strategy_purchase import StrategyPurchase, PurchaseStatus, PurchaseType
 from .creator_earnings import CreatorEarnings, PayoutStatus
+from .strategy_monetization import StrategyMonetization, StrategyPrice
+from .strategy_metrics import StrategyMetrics, CreatorDashboardCache
 
 # This ensures all models are registered
 __all__ = [
@@ -38,5 +40,9 @@ __all__ = [
     "PurchaseStatus",
     "PurchaseType",
     "CreatorEarnings",
-    "PayoutStatus"
+    "PayoutStatus",
+    "StrategyMonetization",
+    "StrategyPrice",
+    "StrategyMetrics",
+    "CreatorDashboardCache"
 ]
