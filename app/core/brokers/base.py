@@ -272,11 +272,13 @@ class BaseBroker(ABC):
         try:
             from .implementations.tradovate import TradovateBroker
             from .implementations.binance import BinanceBroker
+            from .implementations.interactivebrokers import InteractiveBrokersBroker
             
             broker_implementations = {
                 "tradovate": TradovateBroker,
                 "binance": BinanceBroker,
                 "binanceus": BinanceBroker,
+                "interactivebrokers": InteractiveBrokersBroker,
             }
 
             broker_class = broker_implementations.get(broker_id)

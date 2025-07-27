@@ -84,8 +84,13 @@ try:
 except Exception as e:
     logger.error(f"Error registering marketplace router: {e}")
 
-# DISABLED: interactivebrokers endpoint causes deployment failures
-# Need to investigate dependencies before re-enabling
+# Interactive Brokers router - Re-enabled after dependency fixes (July 27, 2025)
+try:
+    from app.api.v1.endpoints import interactivebrokers
+    api_router.include_router(interactivebrokers.router, prefix="/brokers/interactivebrokers", tags=["interactivebrokers"])
+    logger.info("Interactive Brokers router registered")
+except Exception as e:
+    logger.error(f"Error registering Interactive Brokers router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"

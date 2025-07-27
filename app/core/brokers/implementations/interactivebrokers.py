@@ -118,6 +118,80 @@ class InteractiveBrokersBroker(BaseBroker):
         # This method is just a placeholder to satisfy the interface
         return None
 
+    async def validate_credentials(self, credentials: BrokerCredentials) -> bool:
+        """
+        Validate stored Interactive Brokers credentials.
+        For IB, this checks if the IBEam server is running and authenticated.
+        """
+        try:
+            if not credentials or not credentials.custom_data:
+                return False
+            
+            # Get service data
+            service_data = json.loads(credentials.custom_data)
+            droplet_id = service_data.get("droplet_id")
+            
+            if not droplet_id:
+                return False
+            
+            # Check if Digital Ocean droplet exists and is running
+            status = await digital_ocean_server_manager.get_server_status(droplet_id)
+            if status.get("status") != "running":
+                return False
+            
+            # Check if IBEam is authenticated
+            ip_address = status.get("ip_address")
+            if ip_address:
+                return await self._check_ibeam_auth(ip_address)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error validating IB credentials: {str(e)}")
+            return False
+
+    async def refresh_credentials(self, credentials: BrokerCredentials) -> BrokerCredentials:
+        """
+        Refresh Interactive Brokers credentials.
+        For IB, this mainly involves checking server status and updating metadata.
+        """
+        try:
+            if not credentials or not credentials.custom_data:
+                raise ValueError("No credentials to refresh")
+            
+            # Get current service data
+            service_data = json.loads(credentials.custom_data)
+            droplet_id = service_data.get("droplet_id")
+            
+            if droplet_id:
+                # Get latest server status
+                status = await digital_ocean_server_manager.get_server_status(droplet_id)
+                
+                # Update service data with latest status
+                service_data["status"] = status.get("status", "unknown")
+                service_data["last_status_check"] = datetime.utcnow().isoformat()
+                
+                if status.get("ip_address"):
+                    service_data["ip_address"] = status.get("ip_address")
+                    credentials.do_ip_address = status.get("ip_address")
+                
+                # Update credentials
+                credentials.custom_data = json.dumps(service_data)
+                credentials.do_server_status = status.get("status", "unknown")
+                credentials.do_last_status_check = datetime.utcnow()
+                credentials.updated_at = datetime.utcnow()
+                
+                # Check if still valid
+                credentials.is_valid = await self.validate_credentials(credentials)
+            
+            return credentials
+            
+        except Exception as e:
+            logger.error(f"Error refreshing IB credentials: {str(e)}")
+            credentials.is_valid = False
+            credentials.updated_at = datetime.utcnow()
+            return credentials
+
     async def connect_account(
         self,
         user: User,
