@@ -161,6 +161,33 @@ BROKER_CONFIGS = {
         },
         logo_url="/logos/binance-us.svg",
         docs_url="https://docs.binance.us/"
+    ),
+    
+    "interactivebrokers": BrokerConfig(
+        id="interactivebrokers",
+        name="Interactive Brokers",
+        description="Interactive Brokers with IBeam gateway",
+        environments=[BrokerEnvironment.PAPER, BrokerEnvironment.LIVE],
+        connection_method=ConnectionMethod.CREDENTIALS,
+        features=BrokerFeatures(
+            real_time_data=True,
+            supports_websocket=False,
+            supported_order_types=["MARKET", "LIMIT", "STOP"],
+            supports_multiple_accounts=True,
+            supported_assets=["STOCKS", "FUTURES", "OPTIONS", "FOREX"]
+        ),
+        api_endpoints={
+            "paper": ApiEndpointConfig(
+                base="https://localhost:5000/v1/api",
+                websocket=""
+            ),
+            "live": ApiEndpointConfig(
+                base="https://localhost:5000/v1/api",
+                websocket=""
+            )
+        },
+        logo_url="/logos/interactive-brokers.svg",
+        docs_url="https://interactivebrokers.github.io/cpwebapi/"
     )
     # Add more brokers as needed
 }
