@@ -394,8 +394,16 @@ async def startup_event():
 @app.middleware("http")
 async def ensure_subscription_middleware(request: Request, call_next):
     """Middleware to ensure all authenticated users have a subscription record"""
-    # Only process if this is an API route (not for static files, etc.)
-    if request.url.path.startswith("/api/"):
+    # Skip token validation for specific endpoints to reduce log spam
+    skip_paths = [
+        "/api/v1/auth/",  # Auth endpoints
+        "/api/v1/broker-status",  # High-frequency polling endpoint
+        "/api/v1/health",  # Health checks
+        "/docs", "/redoc", "/openapi.json"  # Documentation
+    ]
+    
+    # Only process if this is an API route that needs subscription checking
+    if request.url.path.startswith("/api/") and not any(request.url.path.startswith(path) for path in skip_paths):
         # Check for authenticated request
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):

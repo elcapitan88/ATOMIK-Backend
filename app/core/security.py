@@ -378,12 +378,13 @@ def get_user_from_token(token: str) -> Optional[str]:
         email: str = payload.get("sub")
         token_type: str = payload.get("type")
         
-        if email is None or token_type != "access":
-            # More specific logging for debugging
-            if email is None:
-                logger.warning("Token extraction failed: missing email in sub claim")
-            elif token_type != "access":
-                logger.warning(f"Token extraction failed: invalid token type '{token_type}', expected 'access'")
+        if email is None:
+            logger.warning("Token extraction failed: missing email in sub claim")
+            return None
+        
+        # Handle backward compatibility - allow tokens without type field or with valid access type
+        if token_type is not None and token_type != "access":
+            logger.warning(f"Token extraction failed: invalid token type '{token_type}', expected 'access'")
             return None
             
         return email
@@ -517,25 +518,6 @@ security_service = SecurityService()
 # Rate limiting
 limiter = Limiter(key_func=get_remote_address)
 
-def create_access_token(
-    subject: Union[str, Any],
-    expires_delta: Optional[timedelta] = None
-) -> str:
-    """Create JWT access token"""
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
-        )
-    
-    to_encode = {"exp": expire, "sub": str(subject)}
-    encoded_jwt = jwt.encode(
-        to_encode,
-        settings.SECRET_KEY,
-        algorithm=settings.ALGORITHM
-    )
-    return encoded_jwt
 
 def create_password_reset_token(email: str) -> str:
     """Create password reset token"""
@@ -575,33 +557,6 @@ def generate_security_token(length: int = 32) -> str:
     """Generate secure random token"""
     return secrets.token_urlsafe(length)
 
-async def get_current_user(
-    db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
-) -> User:
-    """Get current authenticated user"""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
-    try:
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM]
-        )
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise credentials_exception
-    return user
 
 async def get_current_active_user(
     current_user: User = Depends(get_current_user),
