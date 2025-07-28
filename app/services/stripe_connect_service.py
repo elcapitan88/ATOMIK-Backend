@@ -775,3 +775,87 @@ class StripeConnectService:
         except Exception as e:
             logger.error(f"Error creating checkout session: {str(e)}")
             raise
+    
+    async def get_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """
+        Get Stripe subscription details.
+        """
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            logger.info(f"Retrieved subscription {subscription_id}")
+            return subscription
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error retrieving subscription: {str(e)}")
+            raise Exception(f"Failed to retrieve subscription: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error retrieving subscription: {str(e)}")
+            raise
+    
+    async def reactivate_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """
+        Reactivate a cancelled subscription.
+        """
+        try:
+            subscription = stripe.Subscription.modify(
+                subscription_id,
+                cancel_at_period_end=False
+            )
+            
+            logger.info(f"Reactivated subscription {subscription_id}")
+            return subscription
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error reactivating subscription: {str(e)}")
+            raise Exception(f"Failed to reactivate subscription: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error reactivating subscription: {str(e)}")
+            raise
+    
+    async def upgrade_subscription(self, subscription_id: str, new_price_id: str) -> Dict[str, Any]:
+        """
+        Upgrade a subscription to a new price.
+        """
+        try:
+            # Get current subscription
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            
+            # Update subscription with new price
+            updated_subscription = stripe.Subscription.modify(
+                subscription_id,
+                items=[{
+                    'id': subscription['items']['data'][0]['id'],
+                    'price': new_price_id,
+                }],
+                proration_behavior='always_invoice'
+            )
+            
+            logger.info(f"Upgraded subscription {subscription_id} to price {new_price_id}")
+            return updated_subscription
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error upgrading subscription: {str(e)}")
+            raise Exception(f"Failed to upgrade subscription: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error upgrading subscription: {str(e)}")
+            raise
+    
+    async def get_subscription_invoices(self, subscription_id: str) -> List[Dict[str, Any]]:
+        """
+        Get invoices for a subscription.
+        """
+        try:
+            invoices = stripe.Invoice.list(
+                subscription=subscription_id,
+                limit=100
+            )
+            
+            logger.info(f"Retrieved {len(invoices.data)} invoices for subscription {subscription_id}")
+            return invoices.data
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error retrieving invoices: {str(e)}")
+            raise Exception(f"Failed to retrieve invoices: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error retrieving invoices: {str(e)}")
+            raise

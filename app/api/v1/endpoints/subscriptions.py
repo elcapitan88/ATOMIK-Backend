@@ -1281,3 +1281,132 @@ async def sync_resource_counts(
             detail=f"Failed to synchronize resource counts: {str(e)}"
         )
 
+# Strategy Subscription Endpoints
+
+@router.get("/strategy-subscriptions")
+async def get_user_strategy_subscriptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all strategy subscriptions for the current user.
+    """
+    try:
+        from app.models.strategy_purchases import StrategyPurchase
+        from app.models.strategy_monetization import StrategyMonetization
+        from app.services.stripe_connect_service import StripeConnectService
+        
+        # Get all purchases for the user
+        purchases = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.stripe_subscription_id.isnot(None)
+        ).all()
+        
+        subscriptions = []
+        stripe_service = StripeConnectService()
+        
+        for purchase in purchases:
+            try:
+                # Get strategy info
+                webhook = db.query(Webhook).filter(Webhook.id == purchase.webhook_id).first()
+                monetization = db.query(StrategyMonetization).filter(
+                    StrategyMonetization.webhook_id == purchase.webhook_id
+                ).first()
+                
+                if not webhook or not monetization:
+                    continue
+                
+                # Get creator info
+                creator = db.query(User).filter(User.id == monetization.creator_user_id).first()
+                
+                # Get Stripe subscription details
+                subscription_data = await stripe_service.get_subscription(
+                    purchase.stripe_subscription_id
+                )
+                
+                subscription_info = {
+                    "id": purchase.id,
+                    "stripe_subscription_id": purchase.stripe_subscription_id,
+                    "strategy_name": webhook.name,
+                    "strategy_id": webhook.id,
+                    "creator_name": creator.username if creator else "Unknown",
+                    "amount": float(purchase.amount_paid),
+                    "currency": subscription_data.get("currency", "usd"),
+                    "status": subscription_data.get("status"),
+                    "interval": subscription_data.get("items", {}).get("data", [{}])[0].get("price", {}).get("recurring", {}).get("interval"),
+                    "current_period_start": subscription_data.get("current_period_start"),
+                    "current_period_end": subscription_data.get("current_period_end"),
+                    "trial_end": subscription_data.get("trial_end"),
+                    "cancel_at_period_end": subscription_data.get("cancel_at_period_end"),
+                    "created_at": purchase.created_at,
+                    "purchase_type": purchase.purchase_type
+                }
+                
+                subscriptions.append(subscription_info)
+                
+            except Exception as e:
+                logger.error(f"Error processing subscription {purchase.id}: {str(e)}")
+                continue
+        
+        return subscriptions
+        
+    except Exception as e:
+        logger.error(f"Error fetching strategy subscriptions for user {current_user.id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch strategy subscriptions"
+        )
+
+@router.post("/strategy-subscriptions/{subscription_id}/cancel")
+async def cancel_strategy_subscription(
+    subscription_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Cancel a user's strategy subscription.
+    """
+    try:
+        from app.models.strategy_purchases import StrategyPurchase
+        from app.services.stripe_connect_service import StripeConnectService
+        
+        # Verify ownership
+        purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.id == subscription_id,
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.stripe_subscription_id.isnot(None)
+        ).first()
+        
+        if not purchase:
+            raise HTTPException(
+                status_code=404,
+                detail="Strategy subscription not found"
+            )
+        
+        # Cancel the Stripe subscription
+        stripe_service = StripeConnectService()
+        result = await stripe_service.cancel_subscription(purchase.stripe_subscription_id)
+        
+        # Update purchase status
+        purchase.status = "cancelled"
+        db.commit()
+        
+        logger.info(f"Cancelled strategy subscription {subscription_id} for user {current_user.id}")
+        
+        return {
+            "status": "success",
+            "message": "Strategy subscription cancelled successfully",
+            "cancel_at_period_end": result.get("cancel_at_period_end"),
+            "current_period_end": result.get("current_period_end")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error cancelling strategy subscription {subscription_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to cancel strategy subscription: {str(e)}"
+        )
+

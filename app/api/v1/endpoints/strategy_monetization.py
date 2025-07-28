@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 
 from ....db.session import get_db
 from ....core.security import get_current_user
+from ....core.config import settings
 from ....models.user import User
 from ....models.webhook import Webhook
 from ....models.strategy_monetization import StrategyMonetization
@@ -13,7 +14,9 @@ from ....schemas.strategy_monetization import (
     StrategyMonetizationResponse,
     MonetizationUpdateRequest,
     StrategyPricingQuery,
-    MonetizationStatsResponse
+    MonetizationStatsResponse,
+    PurchaseRequest,
+    PurchaseResponse
 )
 from ....services.strategy_monetization_service import StrategyMonetizationService
 import logging
@@ -333,19 +336,99 @@ async def disable_strategy_monetization(
             detail=f"Failed to disable monetization: {str(e)}"
         )
 
-@router.post("/{webhook_token}/purchase")
+@router.post("/{webhook_token}/purchase", response_model=PurchaseResponse)
 async def create_purchase_session(
     webhook_token: str,
-    price_type: str,
-    customer_email: str = None,
+    request: PurchaseRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Create a Stripe checkout session for strategy purchase.
-    This will be implemented in Phase 5: Purchase Flow & Subscriber Experience.
     """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Purchase flow will be implemented in Phase 5"
-    )
+    try:
+        # Get webhook/strategy by token
+        webhook = db.query(Webhook).filter(Webhook.webhook_token == webhook_token).first()
+        
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found"
+            )
+        
+        # Get strategy monetization data
+        monetization = db.query(StrategyMonetization).filter(
+            StrategyMonetization.webhook_id == webhook.id
+        ).first()
+        
+        if not monetization or not monetization.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This strategy is not available for purchase"
+            )
+        
+        # Find the requested price
+        strategy_price = None
+        for price in monetization.prices:
+            if price.price_type == request.price_type and price.is_active:
+                strategy_price = price
+                break
+        
+        if not strategy_price:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Price type '{request.price_type}' not found for this strategy"
+            )
+        
+        # Get creator's Stripe account
+        creator = db.query(User).filter(User.id == monetization.creator_user_id).first()
+        if not creator or not creator.creator_profile or not creator.creator_profile.stripe_connect_account_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Creator account not properly configured"
+            )
+        
+        stripe_account_id = creator.creator_profile.stripe_connect_account_id
+        
+        # Calculate platform fee based on creator tier
+        platform_fee_percent = creator.creator_profile.platform_fee
+        
+        # Initialize Stripe service
+        from ....services.stripe_connect_service import StripeConnectService
+        stripe_service = StripeConnectService()
+        
+        # Create checkout session
+        success_url = f"{settings.FRONTEND_URL}/strategy/{webhook.id}?purchase=success&session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = f"{settings.FRONTEND_URL}/strategy/{webhook.id}?purchase=cancelled"
+        
+        checkout_session = await stripe_service.create_checkout_session(
+            price_id=strategy_price.stripe_price_id,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            customer_email=request.customer_email or current_user.email,
+            stripe_account_id=stripe_account_id,
+            metadata={
+                "webhook_id": str(webhook.id),
+                "user_id": str(current_user.id),
+                "price_type": request.price_type,
+                "creator_user_id": str(creator.id),
+                "platform_fee_percent": str(platform_fee_percent)
+            },
+            application_fee_percent=platform_fee_percent
+        )
+        
+        logger.info(f"Created checkout session {checkout_session.id} for strategy {webhook.id}")
+        
+        return PurchaseResponse(
+            checkout_url=checkout_session.url,
+            session_id=checkout_session.id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating purchase session for token {webhook_token}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create checkout session: {str(e)}"
+        )

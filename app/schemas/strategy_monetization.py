@@ -152,3 +152,11 @@ class MonetizationValidationError(BaseModel):
     error_code: str = "VALIDATION_ERROR"
     message: str = "Validation failed"
     validation_errors: List[ValidationError]
+
+class PurchaseRequest(BaseModel):
+    price_type: PriceType
+    customer_email: Optional[str] = None
+
+class PurchaseResponse(BaseModel):
+    checkout_url: str
+    session_id: str
