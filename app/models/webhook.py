@@ -117,7 +117,8 @@ class Webhook(Base):
     )
     
     # Analytics relationships (simplified)
-    metrics = relationship("StrategyMetrics", back_populates="strategy", cascade="all, delete-orphan")
+    # TODO: Uncomment after strategy_metrics table migration is fixed
+    # metrics = relationship("StrategyMetrics", back_populates="strategy", cascade="all, delete-orphan")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
