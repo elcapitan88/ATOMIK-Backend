@@ -34,7 +34,8 @@ class StrategyMetrics(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    strategy = relationship("Webhook", back_populates="metrics")
+    # TODO: Uncomment after webhook metrics relationship is restored
+    # strategy = relationship("Webhook", back_populates="metrics")
     
     # Ensure one record per strategy per day
     __table_args__ = (
@@ -58,7 +59,8 @@ class CreatorDashboardCache(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    creator = relationship("User", back_populates="dashboard_cache")
+    # TODO: Uncomment after user dashboard_cache relationship is restored
+    # creator = relationship("User", back_populates="dashboard_cache")
     
     # Ensure unique cache keys per creator
     __table_args__ = (

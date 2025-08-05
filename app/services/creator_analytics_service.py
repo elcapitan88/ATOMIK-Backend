@@ -9,7 +9,8 @@ import logging
 
 from app.models.user import User
 from app.models.webhook import Webhook
-from app.models.strategy_metrics import StrategyMetrics, CreatorDashboardCache
+# TODO: Uncomment after strategy_metrics table migration is fixed
+# from app.models.strategy_metrics import StrategyMetrics, CreatorDashboardCache
 from app.models.creator_profile import CreatorProfile
 from app.services.stripe_connect_service import StripeConnectService
 from app.core.config import settings
