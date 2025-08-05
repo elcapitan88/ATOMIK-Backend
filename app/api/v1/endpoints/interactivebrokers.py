@@ -1,5 +1,5 @@
 # app/api/v1/endpoints/interactivebrokers.py
-from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks, Response
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
 import logging
@@ -25,7 +25,8 @@ async def connect_ib_account(
     data: Dict[str, Any] = Body(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
+    response: Response = None
 ):
     """
     Connect to Interactive Brokers by provisioning a dedicated IBEam server on Digital Ocean
