@@ -54,7 +54,8 @@ class User(Base):
     strategy_purchases = relationship("StrategyPurchase", back_populates="user", cascade="all, delete-orphan")
     
     # Analytics relationships (simplified)
-    dashboard_cache = relationship("CreatorDashboardCache", back_populates="creator", cascade="all, delete-orphan")
+    # TODO: Uncomment after creator_dashboard_cache table migration is fixed
+    # dashboard_cache = relationship("CreatorDashboardCache", back_populates="creator", cascade="all, delete-orphan")
     
     def __str__(self):
         return f"User(email={self.email})"

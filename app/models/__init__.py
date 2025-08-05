@@ -13,7 +13,8 @@ from .strategy_pricing import StrategyPricing, PricingType, BillingInterval
 from .strategy_purchase import StrategyPurchase, PurchaseStatus, PurchaseType
 from .creator_earnings import CreatorEarnings, PayoutStatus
 from .strategy_monetization import StrategyMonetization, StrategyPrice
-from .strategy_metrics import StrategyMetrics, CreatorDashboardCache
+# TODO: Uncomment after strategy_metrics table migration is fixed
+# from .strategy_metrics import StrategyMetrics, CreatorDashboardCache
 
 # This ensures all models are registered
 __all__ = [
@@ -42,7 +43,8 @@ __all__ = [
     "CreatorEarnings",
     "PayoutStatus",
     "StrategyMonetization",
-    "StrategyPrice",
-    "StrategyMetrics",
-    "CreatorDashboardCache"
+    "StrategyPrice"
+    # TODO: Uncomment after strategy_metrics table migration is fixed
+    # "StrategyMetrics",
+    # "CreatorDashboardCache"
 ]
