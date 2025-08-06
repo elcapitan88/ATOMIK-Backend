@@ -78,7 +78,7 @@ class TradovateBroker(BaseBroker):
                 if data:
                     request_kwargs['json'] = data if isinstance(data, dict) else json.loads(data)
 
-                logger.debug(f"Making request to {url}")
+                # logger.debug(f"Making request to {url}")
 
                 async with session.request(**request_kwargs) as response:
                     response_text = await response.text()
@@ -92,7 +92,7 @@ class TradovateBroker(BaseBroker):
             logger.error(f"Request to {url} timed out after 30 seconds")
             raise ConnectionError(f"Request to {url} timed out")
         except Exception as e:
-            logger.error(f"Request error: {str(e)}")
+            # logger.error(f"Request error: {str(e)}")
             raise
 
     def _validate_token_response(self, tokens: dict) -> bool:
@@ -995,7 +995,7 @@ class TradovateBroker(BaseBroker):
             return normalized_response
             
         except Exception as e:
-            logger.error(f"Error getting order status for {order_id}: {str(e)}")
+            # logger.error(f"Error getting order status for {order_id}: {str(e)}")
             # Return an error response rather than raising, to help monitoring service continue
             return {
                 "order_id": str(order_id),
