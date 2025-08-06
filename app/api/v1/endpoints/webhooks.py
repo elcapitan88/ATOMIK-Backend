@@ -69,7 +69,8 @@ async def generate_webhook(
 
         # Determine sharing settings based on usage intent
         usage_intent = webhook_in.usage_intent or 'personal'
-        is_shared = usage_intent == 'share_free'
+        # Share both free and monetized strategies to marketplace
+        is_shared = usage_intent in ['share_free', 'monetize']
         
         # Create webhook
         webhook = Webhook(

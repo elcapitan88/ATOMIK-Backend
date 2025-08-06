@@ -146,9 +146,12 @@ class StrategyMonetizationService:
                 await self.stripe_service.delete_product(stripe_product['id'], stripe_account_id)
                 raise ValueError("Failed to create any pricing options")
             
-            # Update webhook to mark as monetized
+            # Update webhook to mark as monetized and shared
             webhook.is_monetized = True
             webhook.usage_intent = 'monetize'
+            webhook.is_shared = True  # Ensure monetized strategies are shared to marketplace
+            if not webhook.sharing_enabled_at:
+                webhook.sharing_enabled_at = datetime.utcnow()
             
             # Commit all changes
             self.db.commit()
