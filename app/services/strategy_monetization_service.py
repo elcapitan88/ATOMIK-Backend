@@ -165,7 +165,7 @@ class StrategyMonetizationService:
             logger.info(f"Successfully set up monetization for strategy {webhook.name} with {len(created_prices)} pricing options")
             
             return StrategyMonetizationResponse(
-                id=strategy_monetization.id,
+                id=str(strategy_monetization.id),
                 webhook_id=webhook_id,
                 stripe_product_id=stripe_product['id'],
                 creator_user_id=creator_user_id,
@@ -175,14 +175,16 @@ class StrategyMonetizationService:
                 created_at=strategy_monetization.created_at,
                 prices=[
                     {
-                        'id': price.id,
+                        'id': str(price.id),
                         'price_type': price.price_type,
                         'stripe_price_id': price.stripe_price_id,
                         'amount': price.amount,
                         'currency': price.currency,
                         'billing_interval': price.billing_interval,
                         'trial_period_days': price.trial_period_days,
-                        'is_active': price.is_active
+                        'is_active': price.is_active,
+                        'display_name': self._get_price_display_name(price.price_type),
+                        'description': self._get_price_description(price.price_type, price.amount, price.billing_interval)
                     } for price in created_prices
                 ]
             )
@@ -258,7 +260,7 @@ class StrategyMonetizationService:
             self.db.commit()
             
             return StrategyMonetizationResponse(
-                id=existing_monetization.id,
+                id=str(existing_monetization.id),
                 webhook_id=existing_monetization.webhook_id,
                 stripe_product_id=existing_monetization.stripe_product_id,
                 creator_user_id=existing_monetization.creator_user_id,
@@ -268,14 +270,16 @@ class StrategyMonetizationService:
                 created_at=existing_monetization.created_at,
                 prices=[
                     {
-                        'id': price.id,
+                        'id': str(price.id),
                         'price_type': price.price_type,
                         'stripe_price_id': price.stripe_price_id,
                         'amount': price.amount,
                         'currency': price.currency,
                         'billing_interval': price.billing_interval,
                         'trial_period_days': price.trial_period_days,
-                        'is_active': price.is_active
+                        'is_active': price.is_active,
+                        'display_name': self._get_price_display_name(price.price_type),
+                        'description': self._get_price_description(price.price_type, price.amount, price.billing_interval)
                     } for price in created_prices
                 ]
             )
@@ -329,7 +333,7 @@ class StrategyMonetizationService:
             ).all()
             
             return StrategyMonetizationResponse(
-                id=monetization.id,
+                id=str(monetization.id),
                 webhook_id=monetization.webhook_id,
                 stripe_product_id=monetization.stripe_product_id,
                 creator_user_id=monetization.creator_user_id,
@@ -339,14 +343,16 @@ class StrategyMonetizationService:
                 created_at=monetization.created_at,
                 prices=[
                     {
-                        'id': price.id,
+                        'id': str(price.id),
                         'price_type': price.price_type,
                         'stripe_price_id': price.stripe_price_id,
                         'amount': price.amount,
                         'currency': price.currency,
                         'billing_interval': price.billing_interval,
                         'trial_period_days': price.trial_period_days,
-                        'is_active': price.is_active
+                        'is_active': price.is_active,
+                        'display_name': self._get_price_display_name(price.price_type),
+                        'description': self._get_price_description(price.price_type, price.amount, price.billing_interval)
                     } for price in prices
                 ]
             )
