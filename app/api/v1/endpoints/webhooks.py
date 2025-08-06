@@ -617,7 +617,7 @@ async def list_shared_strategies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """List all shared strategies"""
+    """List all shared strategies with monetization information"""
     try:
         webhooks = (
             db.query(Webhook)
@@ -626,7 +626,7 @@ async def list_shared_strategies(
             .all()
         )
 
-        # Generate response with webhook URLs
+        # Generate response with webhook URLs and monetization info
         response = []
         for webhook in webhooks:
             webhook_data = webhook.__dict__.copy()
@@ -638,6 +638,15 @@ async def list_shared_strategies(
             # Add username from relationship
             webhook_data["username"] = webhook.user.username
             
+            # Add monetization information for frontend routing
+            webhook_data["is_monetized"] = webhook.is_monetized or False
+            webhook_data["usage_intent"] = webhook.usage_intent or 'personal'
+            
+            # Add marketplace URLs for monetized strategies
+            if webhook.is_monetized or webhook.usage_intent == 'monetize':
+                webhook_data["marketplace_purchase_url"] = f"/marketplace/strategy/{webhook.token}/purchase"
+                webhook_data["pricing_endpoint"] = f"/api/v1/strategy-monetization/{webhook.token}/pricing"
+            
             # Remove SQLAlchemy state
             webhook_data.pop('_sa_instance_state', None)
             # Remove user object as we already have username
@@ -645,6 +654,7 @@ async def list_shared_strategies(
             
             response.append(webhook_data)
 
+        logger.info(f"Listed {len(response)} shared strategies ({sum(1 for s in response if s['is_monetized'])} monetized)")
         return response
 
     except Exception as e:
@@ -695,7 +705,7 @@ async def subscribe_to_strategy(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Subscribe to a strategy"""
+    """Subscribe to a strategy - redirects monetized strategies to payment flow"""
     try:
         webhook = db.query(Webhook).filter(
             Webhook.token == token,
@@ -704,6 +714,36 @@ async def subscribe_to_strategy(
 
         if not webhook:
             raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # SECURITY FIX: Check if this is a monetized strategy
+        if webhook.is_monetized or webhook.usage_intent == 'monetize':
+            # Check if strategy has monetization setup
+            from ....models.strategy_monetization import StrategyMonetization
+            monetization = db.query(StrategyMonetization).filter(
+                StrategyMonetization.webhook_id == webhook.id,
+                StrategyMonetization.is_active == True
+            ).first()
+            
+            if monetization:
+                # This is a monetized strategy - require payment
+                raise HTTPException(
+                    status_code=402,  # Payment Required
+                    detail={
+                        "error_code": "PAYMENT_REQUIRED",
+                        "message": "This strategy requires payment. Please use the marketplace purchase flow.",
+                        "strategy_name": webhook.name,
+                        "is_monetized": True,
+                        "marketplace_url": f"/marketplace/strategy/{token}/purchase",
+                        "pricing_endpoint": f"/api/v1/strategy-monetization/{token}/pricing"
+                    }
+                )
+
+        # Only allow free subscriptions for non-monetized strategies
+        if webhook.usage_intent not in ['share_free']:
+            raise HTTPException(
+                status_code=400,
+                detail="This strategy is not available for free subscription"
+            )
 
         # Check if already subscribed
         existing_subscription = db.query(WebhookSubscription).filter(
@@ -717,7 +757,7 @@ async def subscribe_to_strategy(
                 detail="Already subscribed to this strategy"
             )
 
-        # Create subscription
+        # Create subscription for free strategies only
         subscription = WebhookSubscription(
             webhook_id=webhook.id,
             user_id=current_user.id
@@ -729,9 +769,11 @@ async def subscribe_to_strategy(
 
         db.commit()
 
+        logger.info(f"Free subscription created for strategy {webhook.name} (ID: {webhook.id}) by user {current_user.id}")
+
         return {
             "status": "success",
-            "message": "Successfully subscribed to strategy"
+            "message": "Successfully subscribed to free strategy"
         }
 
     except HTTPException:
