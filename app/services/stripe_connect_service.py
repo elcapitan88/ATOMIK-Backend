@@ -523,6 +523,12 @@ class StripeConnectService:
         Supports both subscription and one-time pricing.
         """
         try:
+            # Convert billing_interval enum to string value if needed
+            if hasattr(billing_interval, 'value'):
+                billing_interval_str = billing_interval.value
+            else:
+                billing_interval_str = str(billing_interval) if billing_interval else None
+            
             # Convert amount to cents for Stripe
             amount_cents = int(float(amount) * 100)
             
@@ -531,16 +537,16 @@ class StripeConnectService:
                 "currency": currency.lower(),
                 "product": product_id,
                 "metadata": {
-                    "price_type": billing_interval or "one_time",
+                    "price_type": billing_interval_str or "one_time",
                     "trial_days": str(trial_period_days),
                     **(metadata or {})
                 }
             }
             
             # Add recurring configuration for subscriptions
-            if billing_interval in ['month', 'year']:
+            if billing_interval_str in ['month', 'year']:
                 price_data["recurring"] = {
-                    "interval": billing_interval,
+                    "interval": billing_interval_str,
                     "trial_period_days": trial_period_days if trial_period_days > 0 else None
                 }
                 
@@ -552,7 +558,7 @@ class StripeConnectService:
                 stripe_account=stripe_account_id
             )
             
-            logger.info(f"Created Stripe price {price.id} for ${amount} {billing_interval or 'one-time'} on account {stripe_account_id}")
+            logger.info(f"Created Stripe price {price.id} for ${amount} {billing_interval_str or 'one-time'} on account {stripe_account_id}")
             return price
             
         except stripe.error.StripeError as e:
