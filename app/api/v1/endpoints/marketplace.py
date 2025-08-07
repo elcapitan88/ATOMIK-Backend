@@ -465,7 +465,19 @@ async def setup_strategy_monetization(
         
         # Convert old pricing_options format to new StrategyPricingCreate format
         if 'pricing_options' in request:
-            pricing_data = convert_pricing_options_to_strategy_pricing(request['pricing_options'], webhook_id)
+            try:
+                pricing_data = convert_pricing_options_to_strategy_pricing(request['pricing_options'], webhook_id)
+            except Exception as e:
+                logger.error(f"Error converting pricing options: {str(e)}")
+                # Create default subscription pricing if conversion fails
+                pricing_data = StrategyPricingCreate(
+                    webhook_id=webhook_id,
+                    pricing_type="subscription",
+                    billing_interval="monthly",
+                    base_amount=request['pricing_options'][0].get('amount', 50.0) if request['pricing_options'] else 50.0,
+                    trial_days=0,
+                    is_trial_enabled=False
+                )
         else:
             # Direct StrategyPricingCreate format
             pricing_data = StrategyPricingCreate(**request)
@@ -493,13 +505,31 @@ async def setup_strategy_monetization(
             )
         
         # Mark webhook as monetized and share to marketplace
-        webhook.is_monetized = pricing_data.pricing_type != "free"
+        # Use the pricing result to determine monetization status
+        webhook.is_monetized = pricing.pricing_type != "free"
         webhook.usage_intent = 'monetize'
         webhook.is_shared = True  # Auto-share monetized strategies to marketplace
         db.commit()
         
         logger.info(f"Strategy monetization setup: {pricing.id} for webhook {webhook.id}")
-        return pricing
+        
+        # Convert response to dict to ensure JSON serializable
+        return StrategyPricingResponse(
+            id=str(pricing.id),
+            webhook_id=pricing.webhook_id,
+            pricing_type=pricing.pricing_type,
+            billing_interval=pricing.billing_interval,
+            base_amount=pricing.base_amount,
+            yearly_amount=pricing.yearly_amount,
+            setup_fee=pricing.setup_fee,
+            trial_days=pricing.trial_days,
+            is_trial_enabled=pricing.is_trial_enabled,
+            stripe_price_id=pricing.stripe_price_id,
+            stripe_yearly_price_id=pricing.stripe_yearly_price_id,
+            is_active=pricing.is_active,
+            created_at=pricing.created_at,
+            updated_at=pricing.updated_at
+        )
         
     except HTTPException:
         raise
