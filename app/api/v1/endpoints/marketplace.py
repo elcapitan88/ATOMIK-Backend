@@ -42,8 +42,8 @@ async def purchase_strategy(
     Purchase a strategy with one-time payment.
     """
     try:
-        # Get strategy by token
-        webhook = db.query(Webhook).filter(Webhook.token == token).first()
+        # Get strategy by token (using webhook_token field for compatibility)
+        webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
         if not webhook:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -115,8 +115,8 @@ async def subscribe_to_strategy(
     Subscribe to a paid strategy with recurring payments.
     """
     try:
-        # Get strategy by token
-        webhook = db.query(Webhook).filter(Webhook.token == token).first()
+        # Get strategy by token (using webhook_token field for compatibility)
+        webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
         if not webhook:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -188,8 +188,8 @@ async def get_strategy_pricing(
     """
     Get pricing options for a strategy.
     """
-    # Get strategy by token
-    webhook = db.query(Webhook).filter(Webhook.token == token).first()
+    # Get strategy by token (using webhook_token field for compatibility)
+    webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
     if not webhook:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -353,4 +353,84 @@ async def update_strategy_pricing(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update strategy pricing"
+        )
+
+
+@router.post("/strategies/{webhook_id}/setup-monetization", response_model=StrategyPricingResponse)
+async def setup_strategy_monetization(
+    webhook_id: int,
+    pricing_data: StrategyPricingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Set up monetization for a strategy (replacement for old system).
+    Creates pricing configuration and Stripe products automatically.
+    """
+    try:
+        # Verify user owns the webhook
+        webhook = db.query(Webhook).filter(
+            Webhook.id == webhook_id,
+            Webhook.user_id == current_user.id
+        ).first()
+        
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found or access denied"
+            )
+        
+        # Verify creator profile and Stripe Connect account
+        if not current_user.creator_profile:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Creator profile required for monetization"
+            )
+            
+        if not current_user.creator_profile.stripe_connect_account_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stripe Connect account required for monetization"
+            )
+        
+        # Set webhook_id in pricing_data if not set
+        pricing_data.webhook_id = webhook_id
+        
+        # Check if pricing already exists (update if exists)
+        existing_pricing = db.query(StrategyPricing).filter(
+            StrategyPricing.webhook_id == webhook.id
+        ).first()
+        
+        if existing_pricing:
+            # Update existing pricing
+            updated_pricing = await marketplace_service.update_strategy_pricing(
+                db=db,
+                pricing=existing_pricing,
+                update_data=pricing_data
+            )
+            pricing = updated_pricing
+        else:
+            # Create new pricing
+            pricing = await marketplace_service.create_strategy_pricing(
+                db=db,
+                webhook=webhook,
+                pricing_data=pricing_data
+            )
+        
+        # Mark webhook as monetized and share to marketplace
+        webhook.is_monetized = pricing_data.pricing_type != "free"
+        webhook.usage_intent = 'monetize'
+        webhook.is_shared = True  # Auto-share monetized strategies to marketplace
+        db.commit()
+        
+        logger.info(f"Strategy monetization setup: {pricing.id} for webhook {webhook.id}")
+        return pricing
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting up monetization: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to set up monetization"
         )

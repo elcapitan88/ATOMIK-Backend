@@ -39,7 +39,8 @@ api_router.include_router(broker.router, prefix="/brokers", tags=["brokers"])
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(strategy.router, prefix="/strategies", tags=["strategies"])
-api_router.include_router(strategy_monetization.router, prefix="/strategies", tags=["strategy-monetization"])
+# Old monetization system removed - consolidated into marketplace
+# api_router.include_router(strategy_monetization.router, prefix="/strategies", tags=["strategy-monetization"])
 api_router.include_router(creator_analytics.router, prefix="/analytics", tags=["creator-analytics"])
 api_router.include_router(subscription.router, prefix="/subscriptions", tags=["subscriptions"])
 
