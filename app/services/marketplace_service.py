@@ -47,7 +47,7 @@ class MarketplaceService:
             )
             
             # If this is a subscription, we'll need to create Stripe prices
-            if pricing_data.pricing_type in [PricingType.SUBSCRIPTION, PricingType.INITIATION_PLUS_SUB]:
+            if pricing_data.pricing_type in ["subscription", "initiation_plus_sub"]:
                 # Get creator's Stripe account
                 creator_profile = db.query(CreatorProfile).filter(
                     CreatorProfile.user_id == webhook.user_id
