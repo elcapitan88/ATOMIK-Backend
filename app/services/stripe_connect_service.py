@@ -952,8 +952,8 @@ class StripeConnectService:
                 if pricing.is_trial_enabled and pricing.trial_days > 0:
                     session_params['subscription_data']['trial_period_days'] = pricing.trial_days
             
-            # Create the checkout session
-            session = stripe.checkout.Session.create(**session_params)
+            # Create the checkout session on the connected account
+            session = stripe.checkout.Session.create(**session_params, stripe_account=connected_account_id)
             
             logger.info(f"Created strategy checkout session {session.id} for connected account {connected_account_id}")
             return session.url
