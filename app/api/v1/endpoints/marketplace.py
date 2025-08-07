@@ -335,11 +335,12 @@ async def create_strategy_checkout_session(
             billing_interval=billing_interval,
             connected_account_id=creator_profile.stripe_connect_account_id,
             customer_email=current_user.email,
-            success_url=f"{settings.FRONTEND_URL}/marketplace/purchase-success?session_id={{CHECKOUT_SESSION_ID}}&strategy_token={token}",
+            success_url=f"{settings.FRONTEND_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}&strategy_token={token}",
             cancel_url=f"{settings.FRONTEND_URL}/marketplace?cancelled=true",
             metadata={
                 'user_id': str(current_user.id),
                 'webhook_id': str(webhook.id),
+                'webhook_token': token,  # Add webhook token for proper linking
                 'creator_id': str(creator_profile.id),
                 'pricing_id': str(pricing.id),
                 'strategy_token': token,
@@ -733,26 +734,27 @@ async def handle_strategy_checkout_completed(db: Session, session_data: dict):
         metadata = session_data.get('metadata', {})
         user_id = metadata.get('user_id')
         webhook_id = metadata.get('webhook_id')
+        webhook_token = metadata.get('webhook_token')  # Use webhook token for linking
         pricing_id = metadata.get('pricing_id')
         purchase_type = metadata.get('purchase_type')
         
-        if not all([user_id, webhook_id, pricing_id]):
+        if not all([user_id, webhook_token, pricing_id]):
             logger.error("Missing required metadata in strategy checkout completion")
             return
         
-        # Get user, webhook, and pricing records
+        # Get user, webhook, and pricing records using webhook token
         user = db.query(User).filter(User.id == user_id).first()
-        webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+        webhook = db.query(Webhook).filter(Webhook.token == webhook_token).first()
         pricing = db.query(StrategyPricing).filter(StrategyPricing.id == pricing_id).first()
         
         if not all([user, webhook, pricing]):
-            logger.error(f"Could not find records for strategy purchase: user={user_id}, webhook={webhook_id}, pricing={pricing_id}")
+            logger.error(f"Could not find records for strategy purchase: user={user_id}, webhook_token={webhook_token}, pricing={pricing_id}")
             return
         
-        # Check if purchase already exists
+        # Check if purchase already exists - use webhook.id for linking
         existing_purchase = db.query(StrategyPurchase).filter(
             StrategyPurchase.user_id == user.id,
-            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.webhook_id == webhook.id,  # Use webhook.id (proper FK)
             StrategyPurchase.pricing_id == pricing.id
         ).first()
         
@@ -777,7 +779,7 @@ async def handle_strategy_checkout_completed(db: Session, session_data: dict):
         # Create strategy purchase record
         purchase = StrategyPurchase(
             user_id=user.id,
-            webhook_id=webhook.id,
+            webhook_id=webhook.id,  # Use webhook.id (proper FK)
             pricing_id=pricing.id,
             amount_paid=amount,
             platform_fee=platform_fee,
@@ -817,16 +819,22 @@ async def handle_strategy_payment_succeeded(db: Session, payment_intent_data: di
     try:
         metadata = payment_intent_data.get('metadata', {})
         user_id = metadata.get('user_id')
-        webhook_id = metadata.get('webhook_id')
+        webhook_token = metadata.get('webhook_token')
         
-        if not user_id or not webhook_id:
-            logger.error("Missing user_id or webhook_id in payment intent metadata")
+        if not user_id or not webhook_token:
+            logger.error("Missing user_id or webhook_token in payment intent metadata")
+            return
+        
+        # Find webhook by token to get the ID
+        webhook = db.query(Webhook).filter(Webhook.token == webhook_token).first()
+        if not webhook:
+            logger.error(f"Webhook not found with token: {webhook_token}")
             return
         
         # Update purchase status to completed
         purchase = db.query(StrategyPurchase).filter(
             StrategyPurchase.user_id == user_id,
-            StrategyPurchase.webhook_id == webhook_id,
+            StrategyPurchase.webhook_id == webhook.id,  # Use webhook.id (proper FK)
             StrategyPurchase.stripe_payment_intent_id == payment_intent_data['id']
         ).first()
         
@@ -903,12 +911,14 @@ async def get_user_purchases(
         # Build response with webhook tokens for easy frontend matching
         purchased_strategies = []
         for purchase in purchases:
-            if purchase.webhook:
+            # Get webhook by joining with webhook_id (which should be webhook.id, not token)
+            webhook = db.query(Webhook).filter(Webhook.id == purchase.webhook_id).first()
+            if webhook:
                 purchased_strategies.append({
                     "id": str(purchase.id),
                     "webhook_id": purchase.webhook_id,
-                    "webhook_token": purchase.webhook.token,
-                    "webhook_name": purchase.webhook.name,
+                    "webhook_token": webhook.token,
+                    "webhook_name": webhook.name,
                     "purchase_type": purchase.purchase_type.value if purchase.purchase_type else None,
                     "status": purchase.status.value if purchase.status else None,
                     "amount_paid": float(purchase.amount_paid) if purchase.amount_paid else 0,
@@ -972,7 +982,7 @@ async def check_strategy_access(
         # Check if user has purchased the strategy
         purchase = db.query(StrategyPurchase).filter(
             StrategyPurchase.user_id == current_user.id,
-            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.webhook_id == webhook.id,  # Use webhook.id (proper FK)
             StrategyPurchase.status.in_([PurchaseStatus.COMPLETED, PurchaseStatus.PENDING])
         ).first()
         
