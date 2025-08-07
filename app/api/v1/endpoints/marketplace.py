@@ -884,6 +884,126 @@ async def handle_strategy_subscription_cancelled(db: Session, subscription_data:
         logger.error(f"Error handling strategy subscription cancellation: {str(e)}")
 
 
+@router.get("/my-purchases")
+async def get_user_purchases(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all strategy purchases for the current user.
+    Returns list of purchased strategies with their webhook tokens.
+    """
+    try:
+        # Query all purchases for this user
+        purchases = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.status.in_([PurchaseStatus.COMPLETED, PurchaseStatus.PENDING])
+        ).all()
+        
+        # Build response with webhook tokens for easy frontend matching
+        purchased_strategies = []
+        for purchase in purchases:
+            if purchase.webhook:
+                purchased_strategies.append({
+                    "id": str(purchase.id),
+                    "webhook_id": purchase.webhook_id,
+                    "webhook_token": purchase.webhook.token,
+                    "webhook_name": purchase.webhook.name,
+                    "purchase_type": purchase.purchase_type.value if purchase.purchase_type else None,
+                    "status": purchase.status.value if purchase.status else None,
+                    "amount_paid": float(purchase.amount_paid) if purchase.amount_paid else 0,
+                    "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
+                    "is_active": purchase.status == PurchaseStatus.COMPLETED,
+                    "stripe_subscription_id": purchase.stripe_subscription_id,
+                    "trial_ends_at": purchase.trial_ends_at.isoformat() if purchase.trial_ends_at else None
+                })
+        
+        return {
+            "purchases": purchased_strategies,
+            "total": len(purchased_strategies)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching user purchases: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user purchases"
+        )
+
+
+@router.get("/strategies/{webhook_token}/access")
+async def check_strategy_access(
+    webhook_token: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check if the current user has access to a specific strategy.
+    Returns access status and purchase details if applicable.
+    """
+    try:
+        # Find the webhook by token
+        webhook = db.query(Webhook).filter(
+            Webhook.token == webhook_token
+        ).first()
+        
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found"
+            )
+        
+        # Check if user owns the strategy
+        if webhook.user_id == current_user.id:
+            return {
+                "has_access": True,
+                "access_type": "owner",
+                "webhook_token": webhook_token
+            }
+        
+        # Check if strategy is free (share_free intent)
+        if webhook.usage_intent == "share_free":
+            return {
+                "has_access": True,
+                "access_type": "free",
+                "webhook_token": webhook_token
+            }
+        
+        # Check if user has purchased the strategy
+        purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.status.in_([PurchaseStatus.COMPLETED, PurchaseStatus.PENDING])
+        ).first()
+        
+        if purchase:
+            return {
+                "has_access": True,
+                "access_type": "purchased",
+                "webhook_token": webhook_token,
+                "purchase_id": str(purchase.id),
+                "purchase_type": purchase.purchase_type.value if purchase.purchase_type else None,
+                "subscription_id": purchase.stripe_subscription_id,
+                "trial_ends_at": purchase.trial_ends_at.isoformat() if purchase.trial_ends_at else None
+            }
+        
+        # No access
+        return {
+            "has_access": False,
+            "access_type": None,
+            "webhook_token": webhook_token
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking strategy access: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to check strategy access"
+        )
+
+
 @router.get("/verify-purchase-session/{session_id}")
 async def verify_purchase_session(
     session_id: str,
