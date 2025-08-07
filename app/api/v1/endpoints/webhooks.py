@@ -738,12 +738,13 @@ async def subscribe_to_strategy(
                     }
                 )
 
-        # Only allow free subscriptions for explicitly free strategies
-        if webhook.usage_intent not in ['share_free'] and not webhook.is_monetized:
-            # Personal strategies that aren't shared shouldn't be subscribable
+        # Only allow subscriptions to shared strategies (personal strategies blocked by is_shared check above)
+        # For shared strategies: non-monetized ones allow free subscription, monetized ones redirect to payment
+        if not webhook.is_shared:
+            # This should already be caught above, but double-check for safety
             raise HTTPException(
                 status_code=400,
-                detail="This strategy is not available for subscription"
+                detail="This strategy is not shared and cannot be subscribed to"
             )
 
         # Check if already subscribed
