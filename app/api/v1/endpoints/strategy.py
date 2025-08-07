@@ -13,7 +13,7 @@ from app.services.strategy_service import StrategyProcessor
 from app.db.session import get_db
 from app.models.strategy import ActivatedStrategy, strategy_follower_quantities 
 from app.models.webhook import Webhook, WebhookSubscription
-from app.models.strategy_monetization import StrategyPurchase
+from app.models.strategy_purchase import StrategyPurchase
 from app.services.subscription_service import SubscriptionService
 from app.models.subscription import Subscription
 from app.models.broker import BrokerAccount
