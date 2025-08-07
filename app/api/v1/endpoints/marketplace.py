@@ -902,11 +902,16 @@ async def get_user_purchases(
     Returns list of purchased strategies with their webhook tokens.
     """
     try:
+        # Debug logging
+        logger.info(f"Getting purchases for user: id={current_user.id}, email={current_user.email}")
+        
         # Query all purchases for this user
         purchases = db.query(StrategyPurchase).filter(
             StrategyPurchase.user_id == current_user.id,
             StrategyPurchase.status.in_([PurchaseStatus.COMPLETED, PurchaseStatus.PENDING])
         ).all()
+        
+        logger.info(f"Found {len(purchases)} purchases for user {current_user.id}")
         
         # Build response with webhook tokens for easy frontend matching
         purchased_strategies = []
