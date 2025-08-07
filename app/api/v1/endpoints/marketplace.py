@@ -906,9 +906,10 @@ async def get_user_purchases(
         logger.info(f"Getting purchases for user: id={current_user.id}, email={current_user.email}")
         
         # Query all purchases for this user
+        # Note: Database contains uppercase status values, but enum defines lowercase
         purchases = db.query(StrategyPurchase).filter(
             StrategyPurchase.user_id == current_user.id,
-            StrategyPurchase.status.in_([PurchaseStatus.COMPLETED, PurchaseStatus.PENDING])
+            StrategyPurchase.status.in_(["COMPLETED", "PENDING"])  # Use actual DB values
         ).all()
         
         logger.info(f"Found {len(purchases)} purchases for user {current_user.id}")
