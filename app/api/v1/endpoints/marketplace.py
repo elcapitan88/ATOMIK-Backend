@@ -335,7 +335,7 @@ async def create_strategy_checkout_session(
             billing_interval=billing_interval,
             connected_account_id=creator_profile.stripe_connect_account_id,
             customer_email=current_user.email,
-            success_url=f"{settings.FRONTEND_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}&strategy_token={token}",
+            success_url=f"{settings.FRONTEND_URL}/marketplace/purchase-success?session_id={{CHECKOUT_SESSION_ID}}&strategy_token={token}",
             cancel_url=f"{settings.FRONTEND_URL}/marketplace?cancelled=true",
             metadata={
                 'user_id': str(current_user.id),
