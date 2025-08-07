@@ -907,9 +907,10 @@ async def get_user_purchases(
         
         # Query all purchases for this user
         # Note: Database contains uppercase status values, but enum defines lowercase
+        from sqlalchemy import text
         purchases = db.query(StrategyPurchase).filter(
             StrategyPurchase.user_id == current_user.id,
-            StrategyPurchase.status.in_(["COMPLETED", "PENDING"])  # Use actual DB values
+            text("status IN ('COMPLETED', 'PENDING')")  # Raw SQL to avoid enum issues
         ).all()
         
         logger.info(f"Found {len(purchases)} purchases for user {current_user.id}")
