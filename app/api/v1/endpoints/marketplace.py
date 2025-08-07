@@ -925,11 +925,11 @@ async def get_user_purchases(
                     "webhook_id": purchase.webhook_id,
                     "webhook_token": webhook.token,
                     "webhook_name": webhook.name,
-                    "purchase_type": purchase.purchase_type.value if purchase.purchase_type else None,
-                    "status": purchase.status.value if purchase.status else None,
+                    "purchase_type": purchase.purchase_type,  # Already a string
+                    "status": purchase.status,  # Already a string
                     "amount_paid": float(purchase.amount_paid) if purchase.amount_paid else 0,
                     "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
-                    "is_active": purchase.status == PurchaseStatus.COMPLETED,
+                    "is_active": purchase.status == "COMPLETED",  # Use string comparison
                     "stripe_subscription_id": purchase.stripe_subscription_id,
                     "trial_ends_at": purchase.trial_ends_at.isoformat() if purchase.trial_ends_at else None
                 })
