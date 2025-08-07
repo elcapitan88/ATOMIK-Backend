@@ -865,3 +865,99 @@ class StripeConnectService:
         except Exception as e:
             logger.error(f"Error retrieving invoices: {str(e)}")
             raise
+    
+    async def create_strategy_checkout_session(
+        self,
+        strategy_name: str,
+        strategy_description: str,
+        pricing: "StrategyPricing",
+        billing_interval: str,
+        connected_account_id: str,
+        customer_email: str,
+        success_url: str,
+        cancel_url: str,
+        metadata: dict
+    ) -> str:
+        """
+        Create a Stripe Checkout session for strategy purchases using Stripe Connect.
+        """
+        try:
+            # Determine the amount and price ID based on billing interval
+            if billing_interval == "yearly" and pricing.yearly_amount:
+                amount = pricing.yearly_amount
+                stripe_price_id = pricing.stripe_yearly_price_id
+            elif billing_interval == "monthly" and pricing.base_amount:
+                amount = pricing.base_amount  
+                stripe_price_id = pricing.stripe_price_id
+            elif billing_interval == "lifetime" and pricing.base_amount:
+                amount = pricing.base_amount
+                stripe_price_id = pricing.stripe_price_id
+            else:
+                raise ValueError(f"Invalid billing interval or missing pricing: {billing_interval}")
+            
+            if not stripe_price_id:
+                raise ValueError(f"Stripe price ID not configured for billing interval: {billing_interval}")
+            
+            # Calculate platform fee (this should match the creator's fee percentage)
+            from app.models.creator_profile import CreatorProfile
+            from app.db.session import SessionLocal
+            
+            db = SessionLocal()
+            try:
+                creator_profile = db.query(CreatorProfile).filter(
+                    CreatorProfile.stripe_connect_account_id == connected_account_id
+                ).first()
+                
+                if creator_profile:
+                    platform_fee_percentage = float(creator_profile.platform_fee) * 100  # Convert to percentage
+                else:
+                    platform_fee_percentage = 20.0  # Default 20% fee
+            finally:
+                db.close()
+            
+            # Create checkout session parameters
+            mode = "subscription" if pricing.pricing_type == "subscription" else "payment"
+            
+            session_params = {
+                'payment_method_types': ['card'],
+                'line_items': [
+                    {
+                        'price': stripe_price_id,
+                        'quantity': 1,
+                    }
+                ],
+                'mode': mode,
+                'success_url': success_url,
+                'cancel_url': cancel_url,
+                'customer_email': customer_email,
+                'metadata': metadata
+            }
+            
+            # For one-time payments, use payment_intent_data for application fees
+            if mode == "payment":
+                session_params['payment_intent_data'] = {
+                    'application_fee_amount': int((amount * platform_fee_percentage / 100) * 100),  # Convert to cents
+                    'on_behalf_of': connected_account_id,
+                    'transfer_data': {
+                        'destination': connected_account_id,
+                    },
+                }
+            else:
+                # For subscriptions, use subscription_data
+                session_params['subscription_data'] = {
+                    'application_fee_percent': platform_fee_percentage,
+                    'on_behalf_of': connected_account_id,
+                }
+                # Add trial period if enabled
+                if pricing.is_trial_enabled and pricing.trial_days > 0:
+                    session_params['subscription_data']['trial_period_days'] = pricing.trial_days
+            
+            # Create the checkout session
+            session = stripe.checkout.Session.create(**session_params)
+            
+            logger.info(f"Created strategy checkout session {session.id} for connected account {connected_account_id}")
+            return session.url
+            
+        except Exception as e:
+            logger.error(f"Error creating strategy checkout session: {str(e)}")
+            raise

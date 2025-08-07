@@ -1,16 +1,19 @@
 # app/api/v1/endpoints/marketplace.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
 from app.api import deps
 from app.core.security import get_current_user
+from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
 from app.models.webhook import Webhook
 from app.models.strategy_pricing import StrategyPricing
-from app.models.strategy_purchase import StrategyPurchase
+from app.models.strategy_purchase import StrategyPurchase, PurchaseStatus, PurchaseType
+from app.models.creator_profile import CreatorProfile
+from app.models.creator_earnings import CreatorEarnings, PayoutStatus
 from app.schemas.marketplace import (
     StrategyPricingCreate,
     StrategyPricingUpdate,
@@ -246,6 +249,114 @@ async def subscribe_to_strategy(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process strategy subscription"
+        )
+
+
+@router.post("/strategies/{token}/create-checkout")
+async def create_strategy_checkout_session(
+    token: str,
+    checkout_request: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a Stripe Checkout session for strategy purchase/subscription.
+    Follows the same pattern as app subscriptions.
+    """
+    try:
+        # Get strategy by token
+        webhook = db.query(Webhook).filter(Webhook.token == token).first()
+        if not webhook:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found"
+            )
+        
+        # Get pricing information
+        pricing = db.query(StrategyPricing).filter(
+            StrategyPricing.webhook_id == webhook.id,
+            StrategyPricing.is_active == True
+        ).first()
+        
+        if not pricing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy pricing not found"
+            )
+        
+        if pricing.pricing_type == "free":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This strategy is free - no checkout required"
+            )
+        
+        # Get creator profile for Stripe Connect account
+        creator_profile = db.query(CreatorProfile).filter(
+            CreatorProfile.user_id == webhook.user_id
+        ).first()
+        
+        if not creator_profile or not creator_profile.stripe_connect_account_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Creator has not set up Stripe Connect account"
+            )
+        
+        # Extract billing interval from request
+        billing_interval = checkout_request.get('billing_interval', 'monthly')
+        
+        # Validate pricing type and billing interval
+        if pricing.pricing_type == "subscription":
+            if billing_interval not in ["monthly", "yearly"]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid billing interval for subscription"
+                )
+        elif pricing.pricing_type == "one_time":
+            billing_interval = "lifetime"
+        
+        # Check if user already has active purchase
+        existing_purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.status.in_(["pending", "completed"])
+        ).first()
+        
+        if existing_purchase:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You already have an active purchase for this strategy"
+            )
+        
+        # Create checkout session using StripeConnectService
+        checkout_url = await stripe_connect_service.create_strategy_checkout_session(
+            strategy_name=webhook.name,
+            strategy_description=webhook.details or f"Access to {webhook.name} trading strategy",
+            pricing=pricing,
+            billing_interval=billing_interval,
+            connected_account_id=creator_profile.stripe_connect_account_id,
+            customer_email=current_user.email,
+            success_url=f"{settings.FRONTEND_URL}/marketplace/purchase-success?session_id={{CHECKOUT_SESSION_ID}}&strategy_token={token}",
+            cancel_url=f"{settings.FRONTEND_URL}/marketplace?cancelled=true",
+            metadata={
+                'user_id': str(current_user.id),
+                'webhook_id': str(webhook.id),
+                'creator_id': str(creator_profile.id),
+                'pricing_id': str(pricing.id),
+                'strategy_token': token,
+                'purchase_type': 'strategy_subscription' if pricing.pricing_type == "subscription" else 'strategy_purchase'
+            }
+        )
+        
+        logger.info(f"Created strategy checkout session for user {current_user.id} and strategy {webhook.id}")
+        return {"checkout_url": checkout_url}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating strategy checkout session: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create checkout session"
         )
 
 
@@ -553,4 +664,295 @@ async def setup_strategy_monetization(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to set up monetization"
+        )
+
+
+@router.post("/webhook")
+async def handle_strategy_webhook(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Handle Stripe webhooks for strategy purchases.
+    Similar to the main subscription webhook handler.
+    """
+    try:
+        # Get the webhook signature from headers
+        sig_header = request.headers.get('stripe-signature')
+        if not sig_header:
+            logger.error("No Stripe signature found in strategy webhook request")
+            return {"status": "error", "message": "No signature header"}
+
+        # Get the raw request body
+        payload = await request.body()
+        
+        # Verify webhook signature using Stripe Connect
+        try:
+            import stripe
+            # Use the webhook endpoint secret for strategy webhooks (if configured)
+            webhook_secret = getattr(settings, 'STRIPE_STRATEGY_WEBHOOK_SECRET', settings.STRIPE_WEBHOOK_SECRET)
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, webhook_secret
+            )
+        except Exception as e:
+            logger.error(f"Strategy webhook signature verification failed: {str(e)}")
+            return {"status": "error", "message": "Invalid signature"}
+
+        # Log event for debugging
+        logger.info(f"Processing strategy webhook event: {event['type']}")
+        
+        # Process different event types
+        event_type = event['type']
+        event_data = event['data']['object']
+
+        # Handle checkout session completion for strategy purchases
+        if event_type == "checkout.session.completed":
+            await handle_strategy_checkout_completed(db, event_data)
+        
+        # Handle successful payments for one-time strategy purchases
+        elif event_type == "payment_intent.succeeded":
+            await handle_strategy_payment_succeeded(db, event_data)
+        
+        # Handle subscription events for recurring strategy purchases
+        elif event_type == "invoice.payment_succeeded":
+            await handle_strategy_subscription_payment(db, event_data)
+        
+        elif event_type == "customer.subscription.deleted":
+            await handle_strategy_subscription_cancelled(db, event_data)
+
+        return {"status": "success"}
+
+    except Exception as e:
+        logger.error(f"Strategy webhook processing error: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+async def handle_strategy_checkout_completed(db: Session, session_data: dict):
+    """Handle successful checkout completion for strategy purchases."""
+    try:
+        metadata = session_data.get('metadata', {})
+        user_id = metadata.get('user_id')
+        webhook_id = metadata.get('webhook_id')
+        pricing_id = metadata.get('pricing_id')
+        purchase_type = metadata.get('purchase_type')
+        
+        if not all([user_id, webhook_id, pricing_id]):
+            logger.error("Missing required metadata in strategy checkout completion")
+            return
+        
+        # Get user, webhook, and pricing records
+        user = db.query(User).filter(User.id == user_id).first()
+        webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+        pricing = db.query(StrategyPricing).filter(StrategyPricing.id == pricing_id).first()
+        
+        if not all([user, webhook, pricing]):
+            logger.error(f"Could not find records for strategy purchase: user={user_id}, webhook={webhook_id}, pricing={pricing_id}")
+            return
+        
+        # Check if purchase already exists
+        existing_purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == user.id,
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.pricing_id == pricing.id
+        ).first()
+        
+        if existing_purchase:
+            logger.info(f"Strategy purchase already exists: {existing_purchase.id}")
+            return
+        
+        # Calculate amounts
+        if session_data.get('mode') == 'subscription':
+            amount = pricing.base_amount if pricing.base_amount else pricing.yearly_amount
+        else:
+            amount = pricing.base_amount or 0
+        
+        # Get creator profile for fee calculation
+        creator_profile = db.query(CreatorProfile).filter(
+            CreatorProfile.user_id == webhook.user_id
+        ).first()
+        
+        platform_fee = (amount * creator_profile.platform_fee) if creator_profile else (amount * 0.20)
+        creator_payout = amount - platform_fee
+        
+        # Create strategy purchase record
+        purchase = StrategyPurchase(
+            user_id=user.id,
+            webhook_id=webhook.id,
+            pricing_id=pricing.id,
+            amount_paid=amount,
+            platform_fee=platform_fee,
+            creator_payout=creator_payout,
+            purchase_type=PurchaseType.SUBSCRIPTION if purchase_type == 'strategy_subscription' else PurchaseType.ONE_TIME,
+            status=PurchaseStatus.COMPLETED,
+            stripe_payment_intent_id=session_data.get('payment_intent'),
+            stripe_subscription_id=session_data.get('subscription')
+        )
+        
+        db.add(purchase)
+        db.commit()
+        db.refresh(purchase)
+        
+        # Create earnings record for creator
+        if creator_profile and creator_payout > 0:
+            earnings = CreatorEarnings(
+                creator_id=creator_profile.id,
+                purchase_id=purchase.id,
+                gross_amount=amount,
+                platform_fee=platform_fee,
+                net_amount=creator_payout,
+                payout_status=PayoutStatus.PENDING
+            )
+            db.add(earnings)
+            db.commit()
+        
+        logger.info(f"Created strategy purchase {purchase.id} for user {user.id} and strategy {webhook.id}")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error handling strategy checkout completion: {str(e)}")
+
+
+async def handle_strategy_payment_succeeded(db: Session, payment_intent_data: dict):
+    """Handle successful one-time payments for strategies."""
+    try:
+        metadata = payment_intent_data.get('metadata', {})
+        user_id = metadata.get('user_id')
+        webhook_id = metadata.get('webhook_id')
+        
+        if not user_id or not webhook_id:
+            logger.error("Missing user_id or webhook_id in payment intent metadata")
+            return
+        
+        # Update purchase status to completed
+        purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == user_id,
+            StrategyPurchase.webhook_id == webhook_id,
+            StrategyPurchase.stripe_payment_intent_id == payment_intent_data['id']
+        ).first()
+        
+        if purchase:
+            purchase.status = PurchaseStatus.COMPLETED
+            db.commit()
+            logger.info(f"Updated strategy purchase {purchase.id} to completed")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error handling strategy payment success: {str(e)}")
+
+
+async def handle_strategy_subscription_payment(db: Session, invoice_data: dict):
+    """Handle recurring subscription payments for strategies."""
+    try:
+        subscription_id = invoice_data.get('subscription')
+        if not subscription_id:
+            return
+        
+        # Find purchase by subscription ID
+        purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.stripe_subscription_id == subscription_id
+        ).first()
+        
+        if purchase:
+            purchase.status = PurchaseStatus.COMPLETED
+            db.commit()
+            logger.info(f"Updated strategy subscription {purchase.id} payment status")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error handling strategy subscription payment: {str(e)}")
+
+
+async def handle_strategy_subscription_cancelled(db: Session, subscription_data: dict):
+    """Handle cancelled strategy subscriptions."""
+    try:
+        subscription_id = subscription_data.get('id')
+        if not subscription_id:
+            return
+        
+        # Find purchase by subscription ID
+        purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.stripe_subscription_id == subscription_id
+        ).first()
+        
+        if purchase:
+            purchase.status = PurchaseStatus.CANCELLED
+            db.commit()
+            logger.info(f"Cancelled strategy subscription {purchase.id}")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error handling strategy subscription cancellation: {str(e)}")
+
+
+@router.get("/verify-purchase-session/{session_id}")
+async def verify_purchase_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Verify a Stripe checkout session and associated purchase.
+    Called by the frontend success page to confirm purchase completion.
+    """
+    try:
+        import stripe
+        
+        # Retrieve the session from Stripe
+        session = stripe.checkout.Session.retrieve(session_id)
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Checkout session not found"
+            )
+        
+        # Check if payment was successful
+        if session.payment_status != 'paid' and session.mode != 'subscription':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment not completed"
+            )
+        
+        # Get metadata from session
+        metadata = session.metadata or {}
+        user_id = metadata.get('user_id')
+        webhook_id = metadata.get('webhook_id')
+        
+        # Verify the user owns this session
+        if str(current_user.id) != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Check if purchase exists in database
+        purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.webhook_id == webhook_id
+        ).first()
+        
+        webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "payment_status": session.payment_status,
+            "purchase_exists": purchase is not None,
+            "strategy_name": webhook.name if webhook else None,
+            "amount_paid": float(purchase.amount_paid) if purchase else None
+        }
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error verifying session: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stripe error: {str(e)}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error verifying purchase session: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify purchase"
         )
