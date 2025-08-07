@@ -937,16 +937,11 @@ class StripeConnectService:
             if mode == "payment":
                 session_params['payment_intent_data'] = {
                     'application_fee_amount': int((amount * platform_fee_percentage / 100) * 100),  # Convert to cents
-                    'on_behalf_of': connected_account_id,
-                    'transfer_data': {
-                        'destination': connected_account_id,
-                    },
                 }
             else:
                 # For subscriptions, use subscription_data
                 session_params['subscription_data'] = {
                     'application_fee_percent': platform_fee_percentage,
-                    'on_behalf_of': connected_account_id,
                 }
                 # Add trial period if enabled
                 if pricing.is_trial_enabled and pricing.trial_days > 0:
