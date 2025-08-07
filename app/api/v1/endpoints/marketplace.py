@@ -31,6 +31,76 @@ marketplace_service = MarketplaceService()
 stripe_connect_service = StripeConnectService()
 
 
+def convert_pricing_options_to_strategy_pricing(pricing_options: List[dict], webhook_id: int) -> StrategyPricingCreate:
+    """
+    Convert old pricing_options format to new StrategyPricingCreate format.
+    
+    Old format: [{"price_type": "monthly", "amount": 50, "billing_interval": "month", "trial_period_days": 7}]
+    New format: StrategyPricingCreate with single pricing model
+    """
+    if not pricing_options:
+        raise ValueError("No pricing options provided")
+    
+    # Convert old price types to new pricing types
+    monthly_option = None
+    yearly_option = None
+    lifetime_option = None
+    setup_option = None
+    
+    for option in pricing_options:
+        price_type = option.get('price_type')
+        if price_type == 'monthly':
+            monthly_option = option
+        elif price_type == 'yearly':
+            yearly_option = option
+        elif price_type == 'lifetime':
+            lifetime_option = option
+        elif price_type == 'setup':
+            setup_option = option
+    
+    # Determine the new pricing type based on available options
+    if setup_option and (monthly_option or yearly_option):
+        # Setup fee + subscription = initiation_plus_sub
+        pricing_type = "initiation_plus_sub"
+        billing_interval = "monthly" if monthly_option else "yearly"
+        base_amount = monthly_option['amount'] if monthly_option else None
+        yearly_amount = yearly_option['amount'] if yearly_option else None
+        setup_fee = setup_option['amount']
+        trial_days = monthly_option.get('trial_period_days', 0) if monthly_option else yearly_option.get('trial_period_days', 0)
+        
+    elif monthly_option or yearly_option:
+        # Subscription only
+        pricing_type = "subscription"
+        billing_interval = "monthly"  # Default to monthly display
+        base_amount = monthly_option['amount'] if monthly_option else None
+        yearly_amount = yearly_option['amount'] if yearly_option else None
+        setup_fee = None
+        trial_days = monthly_option.get('trial_period_days', 0) if monthly_option else yearly_option.get('trial_period_days', 0)
+        
+    elif lifetime_option:
+        # One-time payment
+        pricing_type = "one_time"
+        billing_interval = None
+        base_amount = lifetime_option['amount']
+        yearly_amount = None
+        setup_fee = None
+        trial_days = 0
+        
+    else:
+        raise ValueError("Invalid pricing options - no supported pricing model found")
+    
+    return StrategyPricingCreate(
+        webhook_id=webhook_id,
+        pricing_type=pricing_type,
+        billing_interval=billing_interval,
+        base_amount=base_amount,
+        yearly_amount=yearly_amount,
+        setup_fee=setup_fee,
+        trial_days=trial_days,
+        is_trial_enabled=trial_days > 0
+    )
+
+
 @router.post("/strategies/{token}/purchase", response_model=StrategyPurchaseResponse)
 async def purchase_strategy(
     token: str,
@@ -359,7 +429,7 @@ async def update_strategy_pricing(
 @router.post("/strategies/{webhook_id}/setup-monetization", response_model=StrategyPricingResponse)
 async def setup_strategy_monetization(
     webhook_id: int,
-    pricing_data: StrategyPricingCreate,
+    request: dict,  # Accept any format for compatibility
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -393,8 +463,13 @@ async def setup_strategy_monetization(
                 detail="Stripe Connect account required for monetization"
             )
         
-        # Set webhook_id in pricing_data if not set
-        pricing_data.webhook_id = webhook_id
+        # Convert old pricing_options format to new StrategyPricingCreate format
+        if 'pricing_options' in request:
+            pricing_data = convert_pricing_options_to_strategy_pricing(request['pricing_options'], webhook_id)
+        else:
+            # Direct StrategyPricingCreate format
+            pricing_data = StrategyPricingCreate(**request)
+            pricing_data.webhook_id = webhook_id
         
         # Check if pricing already exists (update if exists)
         existing_pricing = db.query(StrategyPricing).filter(

@@ -717,14 +717,14 @@ async def subscribe_to_strategy(
 
         # SECURITY FIX: Check if this is a monetized strategy
         if webhook.is_monetized or webhook.usage_intent == 'monetize':
-            # Check if strategy has monetization setup
-            from ....models.strategy_monetization import StrategyMonetization
-            monetization = db.query(StrategyMonetization).filter(
-                StrategyMonetization.webhook_id == webhook.id,
-                StrategyMonetization.is_active == True
+            # Check if strategy has monetization setup (NEW system)
+            from ....models.strategy_pricing import StrategyPricing
+            pricing = db.query(StrategyPricing).filter(
+                StrategyPricing.webhook_id == webhook.id,
+                StrategyPricing.is_active == True
             ).first()
             
-            if monetization:
+            if pricing and pricing.pricing_type != "free":
                 # This is a monetized strategy - require payment
                 raise HTTPException(
                     status_code=402,  # Payment Required
@@ -738,11 +738,12 @@ async def subscribe_to_strategy(
                     }
                 )
 
-        # Only allow free subscriptions for non-monetized strategies
-        if webhook.usage_intent not in ['share_free']:
+        # Only allow free subscriptions for explicitly free strategies
+        if webhook.usage_intent not in ['share_free'] and not webhook.is_monetized:
+            # Personal strategies that aren't shared shouldn't be subscribable
             raise HTTPException(
                 status_code=400,
-                detail="This strategy is not available for free subscription"
+                detail="This strategy is not available for subscription"
             )
 
         # Check if already subscribed
