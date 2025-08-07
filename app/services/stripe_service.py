@@ -18,32 +18,31 @@ class StripeService:
 
     async def verify_subscription_status(self, customer_id: str) -> bool:
         """
-        Verify if customer has an active subscription
+        Verify if customer has an active or trialing subscription
         
         Args:
             customer_id: Stripe customer ID
             
         Returns:
-            bool: True if subscription is active, False otherwise
+            bool: True if subscription is active or trialing, False otherwise
         """
         try:
-            # Get all subscriptions for customer
+            # Get all subscriptions for customer (remove status filter to include trialing)
             subscriptions = stripe.Subscription.list(
                 customer=customer_id,
-                status='active',
                 limit=1
             )
 
-            # Check for active subscription
+            # Check for active or trialing subscription
             if not subscriptions.data:
-                logger.warning(f"No active subscriptions found for customer {customer_id}")
+                logger.warning(f"No subscriptions found for customer {customer_id}")
                 return False
 
             subscription = subscriptions.data[0]
 
-            # Additional verification checks
-            if subscription.status != 'active':
-                logger.warning(f"Subscription {subscription.id} is not active for customer {customer_id}")
+            # Accept both 'active' and 'trialing' subscriptions
+            if subscription.status not in ['active', 'trialing']:
+                logger.warning(f"Subscription {subscription.id} status '{subscription.status}' not valid for customer {customer_id}")
                 return False
 
             # Check if subscription is past due
@@ -53,7 +52,7 @@ class StripeService:
                     logger.warning(f"Subscription {subscription.id} is past due for customer {customer_id}")
                     return False
 
-            logger.info(f"Verified active subscription for customer {customer_id}")
+            logger.info(f"Verified {subscription.status} subscription for customer {customer_id}")
             return True
 
         except stripe.error.StripeError as e:
