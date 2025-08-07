@@ -935,7 +935,9 @@ async def get_user_purchases(
         
         return {
             "purchases": purchased_strategies,
-            "total": len(purchased_strategies)
+            "total": len(purchased_strategies),
+            "debug_user_id": current_user.id,
+            "debug_user_email": current_user.email
         }
         
     except Exception as e:
