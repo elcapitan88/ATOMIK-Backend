@@ -112,8 +112,8 @@ async def purchase_strategy(
     Purchase a strategy with one-time payment.
     """
     try:
-        # Get strategy by token (using webhook_token field for compatibility)
-        webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
+        # Get strategy by token
+        webhook = db.query(Webhook).filter(Webhook.token == token).first()
         if not webhook:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -185,8 +185,8 @@ async def subscribe_to_strategy(
     Subscribe to a paid strategy with recurring payments.
     """
     try:
-        # Get strategy by token (using webhook_token field for compatibility)
-        webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
+        # Get strategy by token
+        webhook = db.query(Webhook).filter(Webhook.token == token).first()
         if not webhook:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -259,8 +259,8 @@ async def get_strategy_pricing(
     Get pricing options for a strategy.
     """
     try:
-        # Get strategy by token (using webhook_token field for compatibility)
-        webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
+        # Get strategy by token
+        webhook = db.query(Webhook).filter(Webhook.token == token).first()
         if not webhook:
             logger.error(f"Strategy not found for token: {token}")
             raise HTTPException(
