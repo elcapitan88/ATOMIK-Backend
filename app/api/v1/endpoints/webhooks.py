@@ -645,7 +645,7 @@ async def list_shared_strategies(
             # Add marketplace URLs for monetized strategies
             if webhook.is_monetized or webhook.usage_intent == 'monetize':
                 webhook_data["marketplace_purchase_url"] = f"/marketplace/strategy/{webhook.token}/purchase"
-                webhook_data["pricing_endpoint"] = f"/api/v1/strategies/{webhook.token}/pricing"
+                webhook_data["pricing_endpoint"] = f"/api/v1/marketplace/strategies/{webhook.token}/pricing"
             
             # Remove SQLAlchemy state
             webhook_data.pop('_sa_instance_state', None)
@@ -734,7 +734,7 @@ async def subscribe_to_strategy(
                         "strategy_name": webhook.name,
                         "is_monetized": True,
                         "marketplace_url": f"/marketplace/strategy/{token}/purchase",
-                        "pricing_endpoint": f"/api/v1/strategy-monetization/{token}/pricing"
+                        "pricing_endpoint": f"/api/v1/marketplace/strategies/{token}/pricing"
                     }
                 )
 
