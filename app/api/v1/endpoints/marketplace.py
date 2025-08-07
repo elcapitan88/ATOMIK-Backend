@@ -258,57 +258,72 @@ async def get_strategy_pricing(
     """
     Get pricing options for a strategy.
     """
-    # Get strategy by token (using webhook_token field for compatibility)
-    webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
-    if not webhook:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Strategy not found"
-        )
-    
-    # Get pricing information
-    pricing = db.query(StrategyPricing).filter(
-        StrategyPricing.webhook_id == webhook.id,
-        StrategyPricing.is_active == True
-    ).first()
-    
-    if not pricing:
-        # Return free pricing if no pricing set
-        return PricingOptionsResponse(
-            webhook_id=webhook.id,
-            pricing_type="free",
-            is_free=True,
-            user_has_access=True,
-            user_purchase=None
-        )
-    
-    # Check user's current access
-    user_purchase = None
-    user_has_access = pricing.pricing_type == "free"
-    
-    if current_user:
-        user_purchase = db.query(StrategyPurchase).filter(
-            StrategyPurchase.user_id == current_user.id,
-            StrategyPurchase.webhook_id == webhook.id,
-            StrategyPurchase.status.in_(["pending", "completed"])
+    try:
+        # Get strategy by token (using webhook_token field for compatibility)
+        webhook = db.query(Webhook).filter(Webhook.webhook_token == token).first()
+        if not webhook:
+            logger.error(f"Strategy not found for token: {token}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy not found"
+            )
+        
+        logger.info(f"Found webhook {webhook.id} for token {token}")
+        
+        # Get pricing information
+        pricing = db.query(StrategyPricing).filter(
+            StrategyPricing.webhook_id == webhook.id,
+            StrategyPricing.is_active == True
         ).first()
         
-        if user_purchase:
-            user_has_access = True
-    
-    return PricingOptionsResponse(
-        webhook_id=webhook.id,
-        pricing_type=pricing.pricing_type,
-        base_amount=pricing.base_amount,
-        yearly_amount=pricing.yearly_amount,
-        setup_fee=pricing.setup_fee,
-        trial_days=pricing.trial_days,
-        is_trial_enabled=pricing.is_trial_enabled,
-        billing_intervals=["monthly", "yearly"] if pricing.pricing_type in ["subscription", "initiation_plus_sub"] else [],
-        is_free=pricing.pricing_type == "free",
-        user_has_access=user_has_access,
-        user_purchase=user_purchase
-    )
+        if not pricing:
+            logger.info(f"No pricing found for webhook {webhook.id}, returning free pricing")
+            # Return free pricing if no pricing set
+            return PricingOptionsResponse(
+                webhook_id=webhook.id,
+                pricing_type="free",
+                is_free=True,
+                user_has_access=True,
+                user_purchase=None
+            )
+        
+        logger.info(f"Found pricing {pricing.id} for webhook {webhook.id}")
+        
+        # Check user's current access
+        user_purchase = None
+        user_has_access = pricing.pricing_type == "free"
+        
+        if current_user:
+            user_purchase = db.query(StrategyPurchase).filter(
+                StrategyPurchase.user_id == current_user.id,
+                StrategyPurchase.webhook_id == webhook.id,
+                StrategyPurchase.status.in_(["pending", "completed"])
+            ).first()
+            
+            if user_purchase:
+                user_has_access = True
+        
+        return PricingOptionsResponse(
+            webhook_id=webhook.id,
+            pricing_type=pricing.pricing_type,
+            base_amount=pricing.base_amount,
+            yearly_amount=pricing.yearly_amount,
+            setup_fee=pricing.setup_fee,
+            trial_days=pricing.trial_days,
+            is_trial_enabled=pricing.is_trial_enabled,
+            billing_intervals=["monthly", "yearly"] if pricing.pricing_type in ["subscription", "initiation_plus_sub"] else [],
+            is_free=pricing.pricing_type == "free",
+            user_has_access=user_has_access,
+            user_purchase=user_purchase
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pricing for token {token}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get pricing information: {str(e)}"
+        )
 
 
 @router.post("/webhook-pricing", response_model=StrategyPricingResponse)
