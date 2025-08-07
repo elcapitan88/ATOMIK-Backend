@@ -930,7 +930,8 @@ class StripeConnectService:
                 'success_url': success_url,
                 'cancel_url': cancel_url,
                 'customer_email': customer_email,
-                'metadata': metadata
+                'metadata': metadata,
+                'allow_promotion_codes': True,  # Enable coupon/promo codes
             }
             
             # For one-time payments, use payment_intent_data for application fees
