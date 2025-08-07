@@ -13,6 +13,7 @@ from app.services.strategy_service import StrategyProcessor
 from app.db.session import get_db
 from app.models.strategy import ActivatedStrategy, strategy_follower_quantities 
 from app.models.webhook import Webhook, WebhookSubscription
+from app.models.strategy_monetization import StrategyPurchase
 from app.services.subscription_service import SubscriptionService
 from app.models.subscription import Subscription
 from app.models.broker import BrokerAccount
@@ -97,14 +98,23 @@ async def activate_strategy(
         if not webhook:
             raise HTTPException(status_code=404, detail="Webhook not found")
 
-        # Check if user owns or is subscribed to the webhook
+        # Check if user has access to this webhook
         is_owner = webhook.user_id == current_user.id
+        
+        # Check free subscription access
         is_subscriber = db.query(WebhookSubscription).filter(
             WebhookSubscription.webhook_id == webhook.id,
             WebhookSubscription.user_id == current_user.id
         ).first() is not None
+        
+        # Check purchased strategy access (for monetized strategies)
+        has_purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.status == "COMPLETED"
+        ).first() is not None
 
-        if not (is_owner or is_subscriber):
+        if not (is_owner or is_subscriber or has_purchase):
             raise HTTPException(
                 status_code=403,
                 detail="You don't have access to this webhook"
