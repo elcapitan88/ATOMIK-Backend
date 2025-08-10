@@ -193,7 +193,7 @@ class SubscriptionService:
                 "webhook_rate_limit": "300/min",
                 "price_monthly": "$49/month",
                 "price_yearly": "$468/year ($39/month)",
-                "has_trial": "14-day free trial"
+                "has_trial": "7-day free trial"
             },
             "elite": {  # Internal tier ID (was Elite, now displayed as "Pro")
                 "name": "Pro",  # New display name
@@ -207,7 +207,7 @@ class SubscriptionService:
                 "price_monthly": "$89/month",
                 "price_yearly": "$828/year ($69/month)",
                 "price_lifetime": "$1,990 (one-time payment)",
-                "has_trial": "14-day free trial"
+                "has_trial": "7-day free trial"
             }
         }
         
@@ -281,7 +281,7 @@ class SubscriptionService:
             tier=tier,
             status="trialing",
             is_in_trial=True,
-            trial_ends_at=datetime.utcnow() + timedelta(days=14),
+            trial_ends_at=datetime.utcnow() + timedelta(days=7),
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )

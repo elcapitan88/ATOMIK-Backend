@@ -109,7 +109,7 @@ class Subscription(Base):
         from app.core.subscription_tiers import get_tier_display_name
         return get_tier_display_name(self.tier)
         
-    def set_trial_period(self, days=14):
+    def set_trial_period(self, days=7):
         """Set up a trial period for this subscription"""
         self.is_in_trial = True
         self.trial_ends_at = datetime.utcnow() + timedelta(days=days)

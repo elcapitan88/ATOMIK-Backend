@@ -123,7 +123,7 @@ def is_in_trial_period(subscription_created_at: datetime) -> bool:
     if not subscription_created_at:
         return False
         
-    trial_end_date = subscription_created_at + timedelta(days=14)
+    trial_end_date = subscription_created_at + timedelta(days=7)
     return datetime.utcnow() <= trial_end_date
 
 def get_tier_limits(tier: str) -> Dict[str, Any]:
