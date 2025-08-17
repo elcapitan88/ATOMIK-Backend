@@ -80,6 +80,12 @@ class ActivatedStrategy(Base):
     # Broker Settings
     broker_id = Column(String(50), nullable=True)  # Identifier for the broker
     broker_settings = Column(Text, nullable=True)  # JSON string for broker-specific settings
+    
+    # Position Tracking for Partial Exits
+    last_known_position = Column(Integer, default=0)  # Last known position quantity
+    last_exit_type = Column(String(50), nullable=True)  # Last exit type (EXIT_50, EXIT_FINAL, etc.)
+    partial_exits_count = Column(Integer, default=0)  # Number of partial exits executed
+    last_position_update = Column(DateTime, nullable=True)  # When position was last updated
 
     # Relationships
     user = relationship("User", back_populates="strategies")

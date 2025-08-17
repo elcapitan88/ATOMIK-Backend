@@ -1,7 +1,7 @@
 """Add strategy metrics tables for Phase 4
 
 Revision ID: add_strategy_metrics_tables
-Revises: add_strategy_monetization_tables
+Revises: add_position_tracking_456def
 Create Date: 2025-01-26
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'add_strategy_metrics_tables'
-down_revision = 'add_strategy_monetization_tables'
+down_revision = 'add_position_tracking_456def'
 branch_labels = None
 depends_on = None
 

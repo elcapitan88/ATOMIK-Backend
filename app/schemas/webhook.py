@@ -8,6 +8,17 @@ class WebhookAction(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
 
+class ExitType(str, Enum):
+    """Exit type indicators from TradingView comments"""
+    ENTRY = "ENTRY"
+    EXIT_50 = "EXIT_50"        # Exit 50% of position
+    EXIT_HALF = "EXIT_HALF"    # Alternative naming for 50%
+    EXIT_25 = "EXIT_25"        # Exit 25% of position
+    EXIT_75 = "EXIT_75"        # Exit 75% of position
+    EXIT_FINAL = "EXIT_FINAL"  # Exit all remaining
+    EXIT_ALL = "EXIT_ALL"      # Alternative naming for exit all
+    CUSTOM = "CUSTOM"          # For other exit strategies
+
 class WebhookSourceType(str, Enum):
     TRADINGVIEW = "tradingview"
     TRENDSPIDER = "trendspider"
@@ -27,6 +38,7 @@ class UsageIntent(str, Enum):
 
 class WebhookPayload(BaseModel):
     action: WebhookAction
+    comment: Optional[str] = None  # Receives exit type from TradingView (EXIT_50, EXIT_FINAL, etc.)
 
     @validator('action', pre=True)
     def normalize_action(cls, v):
@@ -34,6 +46,13 @@ class WebhookPayload(BaseModel):
             return v.value  # Return just the value part
         elif isinstance(v, str):
             return v.upper()
+        return v
+    
+    @validator('comment', pre=True)
+    def normalize_comment(cls, v):
+        """Normalize comment to uppercase for consistent processing"""
+        if v and isinstance(v, str):
+            return v.upper().strip()
         return v
 
 class WebhookBase(BaseModel):

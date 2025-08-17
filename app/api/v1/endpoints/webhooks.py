@@ -9,6 +9,7 @@ import secrets
 from datetime import datetime
 import logging
 import os
+import asyncio
 
 from ....models.webhook import Webhook, WebhookLog, WebhookSubscription, WebhookRating
 from ....core.security import get_current_user
@@ -464,10 +465,11 @@ async def get_webhook_logs(
 @router.post("/{token}/test")
 async def test_webhook(
     token: str,
+    test_type: str = "entry",  # entry, exit_half, exit_final, full_cycle
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Test a webhook with sample data"""
+    """Test webhook with different exit scenarios"""
     webhook = db.query(Webhook).filter(
         Webhook.token == token,
         Webhook.user_id == current_user.id
@@ -476,31 +478,94 @@ async def test_webhook(
     if not webhook:
         raise HTTPException(status_code=404, detail="Webhook not found")
 
-    # Create test payload
-    test_payload = {
-        "action": "BUY",
-        "symbol": "ES",
-        "quantity": 1,
-        "order_type": "MARKET",
-        "test": True,
-        "timestamp": datetime.utcnow().isoformat()
+    # Define test payload templates
+    test_payloads = {
+        "entry": {
+            "action": "BUY",
+            "comment": "ENTRY"
+        },
+        "exit_half": {
+            "action": "SELL",
+            "comment": "EXIT_50"
+        },
+        "exit_25": {
+            "action": "SELL",
+            "comment": "EXIT_25"
+        },
+        "exit_75": {
+            "action": "SELL",
+            "comment": "EXIT_75"
+        },
+        "exit_final": {
+            "action": "SELL",
+            "comment": "EXIT_FINAL"
+        },
+        "exit_all": {
+            "action": "SELL",
+            "comment": "EXIT_ALL"
+        }
     }
 
     try:
         webhook_processor = WebhookProcessor(db)
-        result = await webhook_processor.process_webhook(
-            webhook=webhook,
-            payload=test_payload,
-            client_ip="127.0.0.1"
-        )
+        
+        if test_type == "full_cycle":
+            # Test complete entry -> partial exit -> final exit cycle
+            results = []
+            cycle_payloads = ["entry", "exit_half", "exit_final"]
+            
+            for payload_type in cycle_payloads:
+                payload = test_payloads[payload_type].copy()
+                payload["test"] = True
+                payload["timestamp"] = datetime.utcnow().isoformat()
+                
+                result = await webhook_processor.process_webhook(
+                    webhook=webhook,
+                    payload=payload,
+                    client_ip="127.0.0.1"
+                )
+                
+                results.append({
+                    "step": payload_type,
+                    "payload": payload,
+                    "result": result
+                })
+                
+                # Brief delay between orders to allow processing
+                await asyncio.sleep(0.5)
+            
+            return {
+                "status": "success",
+                "message": "Full cycle test completed",
+                "webhook_url": generate_webhook_url(webhook),
+                "cycle_results": results
+            }
+        
+        else:
+            # Test single payload type
+            if test_type not in test_payloads:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid test_type. Options: {list(test_payloads.keys()) + ['full_cycle']}"
+                )
+            
+            test_payload = test_payloads[test_type].copy()
+            test_payload["test"] = True
+            test_payload["timestamp"] = datetime.utcnow().isoformat()
+            
+            result = await webhook_processor.process_webhook(
+                webhook=webhook,
+                payload=test_payload,
+                client_ip="127.0.0.1"
+            )
 
-        return {
-            "status": "success",
-            "message": "Test webhook triggered successfully",
-            "webhook_url": generate_webhook_url(webhook),
-            "test_payload": test_payload,
-            "result": result
-        }
+            return {
+                "status": "success",
+                "message": f"Test webhook triggered successfully with {test_type}",
+                "webhook_url": generate_webhook_url(webhook),
+                "test_payload": test_payload,
+                "result": result
+            }
 
     except Exception as e:
         logger.error(f"Error testing webhook: {str(e)}")

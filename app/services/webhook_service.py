@@ -94,12 +94,17 @@ class WebhookProcessor:
             if action not in {'BUY', 'SELL'}:
                 raise ValueError(f"Invalid action: {action}. Must be BUY or SELL.")
 
-            # Create normalized payload
+            # Create normalized payload with comment field for exit types
             normalized = {
                 'action': action,
+                'comment': payload.get('comment', '').upper() if payload.get('comment') else '',  # Normalize comment to uppercase
                 'timestamp': datetime.utcnow().isoformat(),
                 'source': source_type,
             }
+
+            # Log the exit type if present
+            if normalized['comment']:
+                logger.info(f"Webhook payload includes exit type: {normalized['comment']}")
 
             return normalized
 
@@ -194,6 +199,7 @@ class WebhookProcessor:
                             # Create order data using strategy settings
                             signal_data = {
                                 "action": normalized_payload["action"],
+                                "comment": normalized_payload.get("comment", ""),  # Pass exit type from comment
                                 "symbol": strategy.ticker,
                                 "quantity": strategy.quantity if strategy.strategy_type == 'single' else strategy.leader_quantity,
                                 "order_type": "MARKET",  # Default to market orders for now

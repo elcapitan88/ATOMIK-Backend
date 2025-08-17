@@ -24,6 +24,9 @@ from ..core.alert_manager import TradingAlerts
 from ..core.circuit_breaker import circuit_breaker_manager, CircuitBreakerOpenError
 from ..core.rollback_manager import rollback_manager
 from ..core.graceful_shutdown import shutdown_manager
+# Import partial exit services
+from .position_service import PositionService
+from .exit_calculator import ExitCalculator
 
 logger = get_enhanced_logger(__name__)
 
@@ -167,6 +170,7 @@ class StrategyProcessor:
         self.db = db
         self._lock = asyncio.Lock()
         self.order_pool = OrderPool(db, self)
+        self.position_service = PositionService(db)
 
     async def execute_strategy(
         self,
@@ -301,42 +305,67 @@ class StrategyProcessor:
                             detail=f"Invalid ticker format: {strategy.ticker}"
                         )
 
-                    # Check current positions to prevent duplicate trades
-                    try:
-                        positions = await broker.get_positions(account)
-                        current_position = 0
-                        for position in positions:
-                            if position.get("symbol") == contract_ticker:
-                                current_position = int(position.get("quantity", 0))
-                                break
-                        
-                        logger.info(f"Current position for {contract_ticker}: {current_position}",
-                                   operation="position_check",
-                                   extra_context={"symbol": contract_ticker, "position": current_position})
-                        
-                        # Position-aware logic: check if we should execute based on current position
-                        action = signal_data["action"].upper()
-                        if action == "SELL" and current_position <= 0:
-                            logger.info(f"Skipping SELL signal - no long position in {contract_ticker}",
-                                       operation="position_validation")
-                            return {
-                                "status": "skipped", 
-                                "reason": f"No long position to sell in {contract_ticker}"
-                            }
-                        elif action == "BUY" and current_position >= 0:
-                            # Allow BUY signals to add to position or initiate new position
-                            logger.info(f"Executing BUY signal for {contract_ticker}",
-                                       operation="position_validation")
-                            
-                    except Exception as pos_error:
-                        logger.warning(f"Could not check positions, proceeding with trade",
-                                     operation="position_check", error=pos_error)
+                    # Get current position and calculate appropriate quantity based on exit type
+                    action = signal_data["action"].upper()
+                    exit_type = signal_data.get("comment", "").upper()
+                    
+                    # Get current position using position service
+                    current_position = await self.position_service.get_current_position(
+                        account.account_id,
+                        contract_ticker,
+                        broker,
+                        account
+                    )
+                    
+                    logger.info(f"Current position for {contract_ticker}: {current_position}",
+                               operation="position_check",
+                               extra_context={"symbol": contract_ticker, "position": current_position, "exit_type": exit_type})
+                    
+                    # Calculate quantity using exit calculator
+                    calculated_quantity, calculation_reason = await ExitCalculator.calculate_exit_quantity(
+                        strategy,
+                        exit_type,
+                        current_position,
+                        strategy.quantity,
+                        action
+                    )
+                    
+                    # Validate the calculated quantity
+                    final_quantity, is_valid, validation_message = ExitCalculator.validate_exit_quantity(
+                        action,
+                        calculated_quantity,
+                        current_position,
+                        strategy.max_position_size
+                    )
+                    
+                    # Skip trade if quantity is invalid
+                    if not is_valid or final_quantity <= 0:
+                        logger.info(f"Skipping trade: {validation_message}",
+                                   operation="quantity_validation",
+                                   extra_context={"calculated_quantity": calculated_quantity, "final_quantity": final_quantity})
+                        return {
+                            "status": "skipped",
+                            "reason": validation_message,
+                            "calculation_reason": calculation_reason
+                        }
+                    
+                    # Log quantity calculation details
+                    logger.info(f"Quantity calculation complete",
+                               operation="quantity_calculation",
+                               extra_context={
+                                   "exit_type": exit_type,
+                                   "current_position": current_position,
+                                   "calculated_quantity": calculated_quantity,
+                                   "final_quantity": final_quantity,
+                                   "calculation_reason": calculation_reason,
+                                   "validation_message": validation_message
+                               })
 
-                    # Prepare and execute order with the validated contract ticker
+                    # Prepare and execute order with the calculated quantity
                     order_data = {
                         "account_id": account.account_id,
                         "symbol": contract_ticker,  # Use the full contract ticker
-                        "quantity": strategy.quantity,
+                        "quantity": final_quantity,  # Use calculated quantity instead of strategy.quantity
                         "side": signal_data["action"],
                         "type": signal_data.get("order_type", "MARKET"),
                         "time_in_force": signal_data.get("time_in_force", "GTC"),
@@ -357,7 +386,43 @@ class StrategyProcessor:
                                 broker, account, order_result["order_id"]
                             )
                         
-                        # Log successful order execution
+                        # Update position cache and strategy tracking
+                        position_change = final_quantity if action == "BUY" else -final_quantity
+                        new_position = current_position + position_change
+                        
+                        # Update position cache
+                        await self.position_service.update_position_cache(
+                            account.account_id,
+                            contract_ticker,
+                            position_change,
+                            is_absolute=False
+                        )
+                        
+                        # Update strategy tracking fields
+                        strategy.last_known_position = new_position
+                        strategy.last_exit_type = exit_type if exit_type else None
+                        strategy.last_position_update = datetime.utcnow()
+                        
+                        # Increment partial exits count for exit signals
+                        if action == "SELL" and exit_type and "EXIT" in exit_type:
+                            strategy.partial_exits_count = (strategy.partial_exits_count or 0) + 1
+                        
+                        # Reset tracking for new entries or final exits
+                        if ExitCalculator.should_reset_exit_tracking(action, exit_type):
+                            strategy.partial_exits_count = 0
+                            if action == "BUY":
+                                strategy.last_exit_type = None
+                        
+                        # Track partial exit for audit purposes
+                        if action == "SELL" and exit_type:
+                            await self.position_service.track_partial_exit(
+                                strategy.id,
+                                exit_type,
+                                final_quantity,
+                                new_position
+                            )
+                        
+                        # Log successful order execution with calculated quantity
                         logger.log_trading_event(
                             "order_executed",
                             str(strategy.id),
@@ -365,7 +430,7 @@ class StrategyProcessor:
                             order_id=order_result.get("order_id"),
                             symbol=contract_ticker,
                             side=signal_data["action"],
-                            quantity=strategy.quantity
+                            quantity=final_quantity  # Use actual executed quantity
                         )
                         
                     except Exception as order_error:
