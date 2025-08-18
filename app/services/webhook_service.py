@@ -534,9 +534,14 @@ class RailwayOptimizedWebhookProcessor:
                         }
                         
                         # Use the actual strategy processor with partial exit logic
-                        from .strategy_service import StrategyProcessor
-                        strategy_processor = StrategyProcessor(self.db)
-                        result = await strategy_processor.execute_strategy(strategy, signal_data)
+                        try:
+                            from .strategy_service import StrategyProcessor
+                            strategy_processor = StrategyProcessor(self.db)
+                            result = await strategy_processor.execute_strategy(strategy, signal_data)
+                        except Exception as sp_error:
+                            logger.error(f"Failed to use StrategyProcessor, falling back to direct execution: {str(sp_error)}")
+                            # Fallback to direct execution if StrategyProcessor fails
+                            result = await self._process_strategy_async(strategy, signal_data)
                         
                         # Transform result to show more detail
                         detailed_result = {
@@ -695,11 +700,53 @@ class RailwayOptimizedWebhookProcessor:
                         "result": {"status": "error", "error": f"Invalid ticker format: {strategy.ticker}"}
                     }
 
-                # Prepare and execute order with the validated contract ticker
+                # Calculate quantity based on exit type for partial exits
+                from .position_service import PositionService
+                from .exit_calculator import ExitCalculator
+                
+                position_service = PositionService(sync_db)
+                action = signal_data["action"].upper()
+                exit_type = signal_data.get("comment", "").upper()
+                
+                # Get current position
+                current_position = await position_service.get_current_position(
+                    account.account_id,
+                    contract_ticker,
+                    broker,
+                    account
+                )
+                
+                # Calculate appropriate quantity
+                calculated_quantity, calculation_reason = await ExitCalculator.calculate_exit_quantity(
+                    strategy,
+                    exit_type,
+                    current_position,
+                    strategy.quantity,
+                    action
+                )
+                
+                # Validate the quantity
+                final_quantity, is_valid, validation_message = ExitCalculator.validate_exit_quantity(
+                    action,
+                    calculated_quantity,
+                    current_position,
+                    strategy.max_position_size if hasattr(strategy, 'max_position_size') else None
+                )
+                
+                if not is_valid or final_quantity <= 0:
+                    logger.info(f"Skipping trade: {validation_message}")
+                    return {
+                        "strategy_id": strategy.id,
+                        "result": {"status": "skipped", "message": validation_message}
+                    }
+                
+                logger.info(f"Calculated exit quantity: {final_quantity} (reason: {calculation_reason})")
+                
+                # Prepare and execute order with the calculated quantity
                 order_data = {
                     "account_id": account.account_id,
                     "symbol": contract_ticker,
-                    "quantity": strategy.quantity,
+                    "quantity": final_quantity,  # Use calculated quantity
                     "side": signal_data["action"],
                     "type": signal_data.get("order_type", "MARKET"),
                     "time_in_force": signal_data.get("time_in_force", "GTC"),
