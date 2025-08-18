@@ -171,6 +171,7 @@ async def lifespan(app: FastAPI):
 
 
         logger.info("Application startup completed successfully")
+        logger.info("🚀 PARTIAL EXIT FUNCTIONALITY DEPLOYED - VERSION 2025-08-18-22:08")
         yield
 
     except Exception as e:
