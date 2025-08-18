@@ -526,6 +526,7 @@ class RailwayOptimizedWebhookProcessor:
                         # Create order data using strategy settings with NORMALIZED action
                         signal_data = {
                             "action": normalized_payload.get("action", "BUY"),  # Use normalized action
+                            "comment": normalized_payload.get("comment", ""),  # Pass exit type from comment for partial exits
                             "symbol": strategy.ticker,
                             "quantity": strategy.quantity if strategy.strategy_type == 'single' else strategy.leader_quantity,
                             "order_type": "MARKET",
