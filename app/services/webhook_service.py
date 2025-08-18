@@ -804,9 +804,14 @@ class RailwayOptimizedWebhookProcessor:
             # Create normalized payload
             normalized = {
                 'action': action,
+                'comment': payload.get('comment', '').upper() if payload.get('comment') else '',  # Normalize comment to uppercase
                 'timestamp': datetime.utcnow().isoformat(),
                 'source': source_type,
             }
+
+            # Log the exit type if present
+            if normalized['comment']:
+                logger.info(f"Webhook payload includes exit type: {normalized['comment']}")
 
             return normalized
 
