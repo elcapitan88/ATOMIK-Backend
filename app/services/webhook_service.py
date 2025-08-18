@@ -533,8 +533,10 @@ class RailwayOptimizedWebhookProcessor:
                             "time_in_force": "GTC",
                         }
                         
-                        # Process with strategy processor (this can be optimized further if needed)
-                        result = await self._process_strategy_async(strategy, signal_data)
+                        # Use the actual strategy processor with partial exit logic
+                        from .strategy_service import StrategyProcessor
+                        strategy_processor = StrategyProcessor(self.db)
+                        result = await strategy_processor.execute_strategy(strategy, signal_data)
                         
                         # Transform result to show more detail
                         detailed_result = {
