@@ -787,15 +787,18 @@ class TradovateBroker(BaseBroker):
             api_url = self.api_urls[account.environment]
             headers = self._get_auth_headers(account.credentials)
             
-            response = requests.get(
+            # USE ASYNC REQUEST INSTEAD OF SYNC
+            response = await self._make_request(
+                'GET',
                 f"{api_url}/position/list",
                 headers=headers
             )
             
-            if response.status_code != 200:
-                raise ConnectionError(f"Failed to get positions: {response.text}")
-                
-            return response.json()
+            # Debug logging to see what Tradovate returns
+            logger.info(f"Tradovate position API response for account {account.account_id}: {json.dumps(response, indent=2)}")
+            
+            # Handle None response and ensure we return a list
+            return response or []
         except Exception as e:
             logger.error(f"Error getting positions: {str(e)}")
             raise
@@ -806,15 +809,15 @@ class TradovateBroker(BaseBroker):
             api_url = self.api_urls[account.environment]
             headers = self._get_auth_headers(account.credentials)
             
-            response = requests.get(
+            # USE ASYNC REQUEST INSTEAD OF SYNC
+            response = await self._make_request(
+                'GET',
                 f"{api_url}/order/list",
                 headers=headers
             )
             
-            if response.status_code != 200:
-                raise ConnectionError(f"Failed to get orders: {response.text}")
-                
-            return response.json()
+            # Handle None response and ensure we return a list
+            return response or []
         except Exception as e:
             logger.error(f"Error getting orders: {str(e)}")
             raise
