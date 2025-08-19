@@ -47,21 +47,26 @@ class ExitCalculator:
             current_position=current_position,
             action=action
         ):
-            # Handle BUY actions - always use configured quantity
+            # Parse exit type first to handle ENTRY comments
+            exit_type_upper = (exit_type or "").upper()
+            
+            # Handle ENTRY signals for both BUY and SELL (BUY = long entry, SELL = short entry)
+            if exit_type_upper == "ENTRY":
+                logger.info(f"{action} ENTRY: using configured quantity {configured_quantity}")
+                return configured_quantity, f"{action} entry using configured quantity"
+            
+            # Handle BUY actions (non-entry) - always use configured quantity
             if action == "BUY":
                 logger.info(f"BUY action: using configured quantity {configured_quantity}")
                 return configured_quantity, "Entry using configured quantity"
             
-            # Handle SELL actions with no position
+            # Handle SELL actions with no position (exit attempts)
             if current_position <= 0:
                 logger.warning(f"No position to exit for strategy {strategy.id}")
                 return 0, "No position to exit"
             
-            # Parse exit type and calculate quantity
-            exit_type_upper = (exit_type or "").upper()
-            
-            # Entry signals (shouldn't happen for SELL, but handle gracefully)
-            if exit_type_upper in ["ENTRY", ""]:
+            # Handle SELL with no specific exit type
+            if exit_type_upper == "":
                 # For SELL with no specific exit type, use current position (exit all)
                 logger.info(f"SELL with no exit type specified, exiting full position: {current_position}")
                 return current_position, "Full position exit (no exit type specified)"
