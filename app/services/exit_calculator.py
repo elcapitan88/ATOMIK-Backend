@@ -78,9 +78,14 @@ class ExitCalculator:
                         logger.warning(f"BUY exit attempted on long position {current_position}")
                         return 0, "Cannot BUY to exit long position - use SELL"
                     else:
-                        # No position - treat as entry
-                        logger.info(f"BUY action with no position: using configured quantity {configured_quantity}")
-                        return configured_quantity, "Long entry using configured quantity"
+                        # No position but trying to exit - this is an error
+                        if "EXIT" in exit_type_upper:
+                            logger.warning(f"BUY exit attempted with no position")
+                            return 0, "No position to exit"
+                        else:
+                            # No exit type - treat as entry
+                            logger.info(f"BUY action with no position: using configured quantity {configured_quantity}")
+                            return configured_quantity, "Long entry using configured quantity"
             
             # Handle SELL actions
             elif action == "SELL":
