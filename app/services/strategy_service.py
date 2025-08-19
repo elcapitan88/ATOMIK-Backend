@@ -309,12 +309,13 @@ class StrategyProcessor:
                     action = signal_data["action"].upper()
                     exit_type = signal_data.get("comment", "").upper()
                     
-                    # Get current position using position service
+                    # Get current position using position service (database-first approach)
                     current_position = await self.position_service.get_current_position(
                         account.account_id,
                         contract_ticker,
                         broker,
-                        account
+                        account,
+                        strategy_id=strategy.id  # Pass strategy_id for database lookup
                     )
                     
                     logger.info(f"Current position for {contract_ticker}: {current_position}",
@@ -386,26 +387,18 @@ class StrategyProcessor:
                                 broker, account, order_result["order_id"]
                             )
                         
-                        # Calculate expected position change for tracking (but don't cache it)
+                        # Update database position tracking after successful order execution
                         position_change = final_quantity if action == "BUY" else -final_quantity
+                        await self.position_service.update_database_position(
+                            strategy_id=strategy.id,
+                            account_id=account.account_id,
+                            symbol=contract_ticker,
+                            position_change=position_change,
+                            exit_type=exit_type if exit_type else None
+                        )
+                        
+                        # Calculate new position for logging and tracking
                         new_position = current_position + position_change
-                        
-                        # DON'T update position cache - let broker be the source of truth
-                        
-                        # Update strategy tracking fields
-                        strategy.last_known_position = new_position
-                        strategy.last_exit_type = exit_type if exit_type else None
-                        strategy.last_position_update = datetime.utcnow()
-                        
-                        # Increment partial exits count for exit signals
-                        if action == "SELL" and exit_type and "EXIT" in exit_type:
-                            strategy.partial_exits_count = (strategy.partial_exits_count or 0) + 1
-                        
-                        # Reset tracking for new entries or final exits
-                        if ExitCalculator.should_reset_exit_tracking(action, exit_type):
-                            strategy.partial_exits_count = 0
-                            if action == "BUY":
-                                strategy.last_exit_type = None
                         
                         # Track partial exit for audit purposes
                         if action == "SELL" and exit_type:

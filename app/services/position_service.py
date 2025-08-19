@@ -30,24 +30,36 @@ class PositionService:
         account_id: str, 
         symbol: str,
         broker: Optional[BaseBroker] = None,
-        account: Optional[BrokerAccount] = None
+        account: Optional[BrokerAccount] = None,
+        strategy_id: Optional[int] = None
     ) -> int:
         """
         Get current position for a symbol in an account.
+        Uses database tracking as primary source with broker API as fallback.
         
         Args:
             account_id: The broker account ID
             symbol: The trading symbol/ticker
             broker: Optional broker instance (will be fetched if not provided)
             account: Optional account instance (will be fetched if not provided)
+            strategy_id: Optional strategy ID for database position lookup
             
         Returns:
             Current position quantity (positive for long, negative for short, 0 for flat)
         """
         with logging_context(account_id=account_id, symbol=symbol):
-            # STREAMLINED APPROACH: Always get fresh data from broker
-            # This eliminates cache sync issues entirely
             try:
+                # PRIORITY 1: Use database position tracking if available
+                if strategy_id:
+                    db_position = await self._get_database_position(strategy_id, account_id, symbol)
+                    if db_position is not None:
+                        logger.info(f"Using database position: {db_position}",
+                                   extra_context={"source": "database", "strategy_id": strategy_id})
+                        return db_position
+                
+                # PRIORITY 2: Fallback to broker API
+                logger.info("No database position found, fetching from broker API")
+                
                 # Get account if not provided
                 if not account:
                     account = self.db.query(BrokerAccount).filter(
@@ -82,7 +94,7 @@ class PositionService:
                 return current_position
                 
             except Exception as e:
-                logger.error(f"Error fetching position from broker: {str(e)}",
+                logger.error(f"Error fetching position: {str(e)}",
                            extra_context={"error": str(e)})
                 # Return 0 if we can't determine position (safer than erroring)
                 return 0
@@ -274,3 +286,189 @@ class PositionService:
                     
         except Exception as e:
             logger.error(f"Error tracking partial exit: {str(e)}")
+    
+    async def _get_database_position(self, strategy_id: int, account_id: str, symbol: str) -> Optional[int]:
+        """
+        Get position from database strategy tracking.
+        
+        Args:
+            strategy_id: The strategy ID
+            account_id: The broker account ID
+            symbol: The trading symbol
+            
+        Returns:
+            Current position from database or None if not found/stale
+        """
+        try:
+            from ..models.strategy import ActivatedStrategy
+            
+            strategy = self.db.query(ActivatedStrategy).filter(
+                ActivatedStrategy.id == strategy_id,
+                ActivatedStrategy.account_id == account_id
+            ).first()
+            
+            # Note: We match by strategy_id and account_id only since ticker might be 
+            # different from symbol (e.g., ticker="MNQ" but symbol="MNQU5")
+            
+            if not strategy:
+                logger.debug(f"No strategy found for position lookup: strategy_id={strategy_id}, account_id={account_id}")
+                return None
+            
+            # Check if position data is recent (within last 24 hours for safety)
+            if strategy.last_position_update:
+                from datetime import datetime, timedelta
+                if datetime.utcnow() - strategy.last_position_update > timedelta(hours=24):
+                    logger.warning(f"Database position data is stale for strategy {strategy_id}")
+                    return None
+            
+            position = strategy.last_known_position or 0
+            logger.debug(f"Database position for strategy {strategy_id}: {position}")
+            return position
+            
+        except Exception as e:
+            logger.error(f"Error getting database position: {str(e)}")
+            return None
+    
+    async def update_database_position(
+        self,
+        strategy_id: int,
+        account_id: str,
+        symbol: str,
+        position_change: int,
+        exit_type: Optional[str] = None,
+        is_absolute: bool = False
+    ) -> None:
+        """
+        Update position in database strategy tracking.
+        
+        Args:
+            strategy_id: The strategy ID
+            account_id: The broker account ID  
+            symbol: The trading symbol
+            position_change: The change in position (or absolute value if is_absolute=True)
+            exit_type: The exit type if this is an exit (EXIT_50, EXIT_FINAL, etc.)
+            is_absolute: If True, position_change is the new absolute position
+        """
+        try:
+            from ..models.strategy import ActivatedStrategy
+            from datetime import datetime
+            
+            strategy = self.db.query(ActivatedStrategy).filter(
+                ActivatedStrategy.id == strategy_id,
+                ActivatedStrategy.account_id == account_id
+            ).first()
+            
+            if not strategy:
+                logger.error(f"Strategy not found for position update: strategy_id={strategy_id}, account_id={account_id}")
+                return
+            
+            old_position = strategy.last_known_position or 0
+            
+            if is_absolute:
+                new_position = position_change
+            else:
+                new_position = old_position + position_change
+            
+            # Update strategy position tracking
+            strategy.last_known_position = new_position
+            strategy.last_position_update = datetime.utcnow()
+            
+            if exit_type:
+                strategy.last_exit_type = exit_type
+                # Increment partial exit count for non-final exits
+                if "FINAL" not in exit_type.upper() and "100" not in exit_type:
+                    strategy.partial_exits_count = (strategy.partial_exits_count or 0) + 1
+                else:
+                    # Reset on final exits
+                    strategy.partial_exits_count = 0
+            
+            # Reset tracking on new entries
+            if position_change > 0 and old_position <= 0:
+                strategy.partial_exits_count = 0
+                strategy.last_exit_type = None
+            
+            self.db.commit()
+            
+            logger.info(f"Updated database position for strategy {strategy_id}: {old_position} -> {new_position}",
+                       extra_context={
+                           "position_change": position_change,
+                           "exit_type": exit_type,
+                           "is_absolute": is_absolute
+                       })
+            
+        except Exception as e:
+            logger.error(f"Error updating database position: {str(e)}")
+            self.db.rollback()
+    
+    async def sync_position_with_broker(
+        self,
+        strategy_id: int,
+        account_id: str,
+        symbol: str,
+        broker: Optional[BaseBroker] = None,
+        account: Optional[BrokerAccount] = None
+    ) -> Dict[str, Any]:
+        """
+        Sync database position with broker API and report any discrepancies.
+        
+        Args:
+            strategy_id: The strategy ID
+            account_id: The broker account ID
+            symbol: The trading symbol
+            broker: Optional broker instance
+            account: Optional account instance
+            
+        Returns:
+            Dict with sync results and any discrepancies found
+        """
+        try:
+            # Get database position
+            db_position = await self._get_database_position(strategy_id, account_id, symbol)
+            
+            # Get broker position  
+            if not account:
+                account = self.db.query(BrokerAccount).filter(
+                    BrokerAccount.account_id == account_id,
+                    BrokerAccount.is_active == True
+                ).first()
+            
+            if not broker:
+                broker = BaseBroker.get_broker_instance(account.broker_id, self.db)
+            
+            positions = await broker.get_positions(account)
+            broker_position = 0
+            for position in positions:
+                if position.get("symbol") == symbol:
+                    broker_position = int(position.get("quantity", 0))
+                    break
+            
+            # Compare positions
+            discrepancy = None
+            if db_position is not None and db_position != broker_position:
+                discrepancy = broker_position - db_position
+                logger.warning(f"Position discrepancy detected for strategy {strategy_id}: DB={db_position}, Broker={broker_position}, Diff={discrepancy}")
+                
+                # Optionally update database to match broker
+                await self.update_database_position(
+                    strategy_id=strategy_id,
+                    account_id=account_id,
+                    symbol=symbol,
+                    position_change=broker_position,
+                    is_absolute=True
+                )
+                logger.info(f"Updated database position to match broker: {broker_position}")
+            
+            return {
+                "database_position": db_position,
+                "broker_position": broker_position,
+                "discrepancy": discrepancy,
+                "synced": discrepancy is None,
+                "corrected": discrepancy is not None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error syncing position with broker: {str(e)}")
+            return {
+                "error": str(e),
+                "synced": False
+            }
