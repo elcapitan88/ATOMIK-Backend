@@ -55,44 +55,89 @@ class ExitCalculator:
                 logger.info(f"{action} ENTRY: using configured quantity {configured_quantity}")
                 return configured_quantity, f"{action} entry using configured quantity"
             
-            # Handle BUY actions (non-entry) - always use configured quantity
-            if action == "BUY":
-                logger.info(f"BUY action: using configured quantity {configured_quantity}")
-                return configured_quantity, "Entry using configured quantity"
+            # Determine if we have a position to exit
+            has_long_position = current_position > 0
+            has_short_position = current_position < 0
+            has_no_position = current_position == 0
             
-            # Handle SELL actions with no position (exit attempts)
-            if current_position <= 0:
+            # Handle BUY actions 
+            if action == "BUY":
+                # BUY can be: 1) Long entry, 2) Short exit
+                if has_short_position and exit_type_upper and "EXIT" in exit_type_upper:
+                    # This is a short exit - calculate based on short position size
+                    position_size = abs(current_position)
+                    logger.info(f"BUY exit from short position of {current_position}")
+                elif exit_type_upper == "" or exit_type_upper == "ENTRY":
+                    # This is a long entry
+                    logger.info(f"BUY entry: using configured quantity {configured_quantity}")
+                    return configured_quantity, "Long entry using configured quantity"
+                else:
+                    # BUY with exit type but no short position
+                    if has_long_position:
+                        # Has long position but BUY exit doesn't make sense
+                        logger.warning(f"BUY exit attempted on long position {current_position}")
+                        return 0, "Cannot BUY to exit long position - use SELL"
+                    else:
+                        # No position - treat as entry
+                        logger.info(f"BUY action with no position: using configured quantity {configured_quantity}")
+                        return configured_quantity, "Long entry using configured quantity"
+            
+            # Handle SELL actions
+            elif action == "SELL":
+                # SELL can be: 1) Short entry, 2) Long exit
+                if has_long_position and exit_type_upper and "EXIT" in exit_type_upper:
+                    # This is a long exit - calculate based on long position size
+                    position_size = current_position
+                    logger.info(f"SELL exit from long position of {current_position}")
+                elif exit_type_upper == "" or exit_type_upper == "ENTRY":
+                    # This is a short entry
+                    logger.info(f"SELL entry: using configured quantity {configured_quantity}")
+                    return configured_quantity, "Short entry using configured quantity"
+                else:
+                    # SELL with exit type but no long position - check if we should exit anyway
+                    if has_no_position:
+                        logger.warning(f"No position to exit for strategy {strategy.id}")
+                        return 0, "No position to exit"
+                    else:
+                        # Has short position but SELL exit doesn't make sense
+                        logger.warning(f"SELL exit attempted on short position {current_position}")
+                        return 0, "Cannot SELL to exit short position - use BUY"
+            
+            # If we reach here, we're processing an exit
+            if has_no_position:
                 logger.warning(f"No position to exit for strategy {strategy.id}")
                 return 0, "No position to exit"
             
-            # Handle SELL with no specific exit type
+            # Use absolute position size for percentage calculations
+            position_size = abs(current_position)
+            
+            # Handle exits with no specific exit type
             if exit_type_upper == "":
-                # For SELL with no specific exit type, use current position (exit all)
-                logger.info(f"SELL with no exit type specified, exiting full position: {current_position}")
-                return current_position, "Full position exit (no exit type specified)"
+                logger.info(f"Exit with no type specified, closing full position: {position_size}")
+                return position_size, "Full position exit (no exit type specified)"
             
             # Half position exits
             if exit_type_upper in ["EXIT_50", "EXIT_HALF"]:
-                quantity = math.ceil(current_position * 0.5)
-                logger.info(f"Calculating 50% exit: {current_position} * 0.5 = {quantity}")
+                quantity = math.ceil(position_size * 0.5)
+                logger.info(f"Calculating 50% exit: {position_size} * 0.5 = {quantity}")
                 return quantity, "50% partial exit"
             
             # Quarter position exits
             if exit_type_upper == "EXIT_25":
-                quantity = math.ceil(current_position * 0.25)
-                logger.info(f"Calculating 25% exit: {current_position} * 0.25 = {quantity}")
+                quantity = math.ceil(position_size * 0.25)
+                logger.info(f"Calculating 25% exit: {position_size} * 0.25 = {quantity}")
                 return quantity, "25% partial exit"
             
             # Three-quarter position exits
             if exit_type_upper == "EXIT_75":
-                quantity = math.ceil(current_position * 0.75)
-                logger.info(f"Calculating 75% exit: {current_position} * 0.75 = {quantity}")
+                quantity = math.ceil(position_size * 0.75)
+                logger.info(f"Calculating 75% exit: {position_size} * 0.75 = {quantity}")
                 return quantity, "75% partial exit"
             
             # Final/All exits
             if exit_type_upper in ["EXIT_FINAL", "EXIT_ALL", "EXIT_100"]:
-                logger.info(f"Final exit: closing entire position of {current_position}")
-                return current_position, "Final exit - closing all remaining"
+                logger.info(f"Final exit: closing entire position of {position_size}")
+                return position_size, "Final exit - closing all remaining"
             
             # Handle custom percentage exits (e.g., EXIT_33, EXIT_67)
             percentage_match = re.match(r"EXIT_(\d+)", exit_type_upper)
