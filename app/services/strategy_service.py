@@ -386,17 +386,11 @@ class StrategyProcessor:
                                 broker, account, order_result["order_id"]
                             )
                         
-                        # Update position cache and strategy tracking
+                        # Calculate expected position change for tracking (but don't cache it)
                         position_change = final_quantity if action == "BUY" else -final_quantity
                         new_position = current_position + position_change
                         
-                        # Update position cache
-                        await self.position_service.update_position_cache(
-                            account.account_id,
-                            contract_ticker,
-                            position_change,
-                            is_absolute=False
-                        )
+                        # DON'T update position cache - let broker be the source of truth
                         
                         # Update strategy tracking fields
                         strategy.last_known_position = new_position

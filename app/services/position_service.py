@@ -23,7 +23,7 @@ class PositionService:
     
     def __init__(self, db: Session):
         self.db = db
-        self._cache_ttl = 30  # Cache positions for 30 seconds
+        self._cache_ttl = 3600  # Cache positions for 1 hour (long enough for trading sessions)
         
     async def get_current_position(
         self, 
@@ -45,13 +45,8 @@ class PositionService:
             Current position quantity (positive for long, negative for short, 0 for flat)
         """
         with logging_context(account_id=account_id, symbol=symbol):
-            # Try cache first
-            cached_position = await self._get_cached_position(account_id, symbol)
-            if cached_position is not None:
-                logger.debug(f"Retrieved cached position: {cached_position}")
-                return cached_position
-            
-            # Fetch from broker if not cached
+            # STREAMLINED APPROACH: Always get fresh data from broker
+            # This eliminates cache sync issues entirely
             try:
                 # Get account if not provided
                 if not account:
