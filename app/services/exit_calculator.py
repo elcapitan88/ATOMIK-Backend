@@ -213,7 +213,8 @@ class ExitCalculator:
         action: str,
         calculated_quantity: int,
         current_position: int,
-        max_position_size: Optional[int] = None
+        max_position_size: Optional[int] = None,
+        exit_type: Optional[str] = None
     ) -> Tuple[int, bool, str]:
         """
         Validate and adjust exit quantity to prevent over-trading.
@@ -223,6 +224,7 @@ class ExitCalculator:
             calculated_quantity: The calculated quantity to trade
             current_position: Current position in the account
             max_position_size: Optional maximum position size limit
+            exit_type: Optional exit type to determine if this is an entry or exit
             
         Returns:
             Tuple of (adjusted quantity, is_valid, validation_message)
@@ -231,14 +233,24 @@ class ExitCalculator:
         if calculated_quantity <= 0:
             return 0, False, "Cannot trade zero or negative quantity"
         
-        # For SELL orders, ensure we don't sell more than we have
+        # Determine if this is an entry or exit
+        exit_type_upper = (exit_type or "").upper()
+        is_entry = exit_type_upper == "ENTRY" or exit_type_upper == ""
+        is_exit = "EXIT" in exit_type_upper
+        
+        # For SELL orders
         if action == "SELL":
-            if calculated_quantity > current_position:
+            if is_entry:
+                # SELL ENTRY (short entry) - don't validate against current position
+                return calculated_quantity, True, "Valid short entry quantity"
+            elif is_exit and calculated_quantity > current_position:
+                # SELL EXIT - ensure we don't sell more than we have
                 logger.warning(
                     f"Reducing sell quantity from {calculated_quantity} to {current_position} to match position"
                 )
                 return current_position, True, f"Quantity adjusted to match position ({current_position})"
-            return calculated_quantity, True, "Valid sell quantity"
+            else:
+                return calculated_quantity, True, "Valid sell quantity"
         
         # For BUY orders, check max position size if configured
         if action == "BUY" and max_position_size:

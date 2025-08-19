@@ -336,7 +336,8 @@ class StrategyProcessor:
                         action,
                         calculated_quantity,
                         current_position,
-                        strategy.max_position_size
+                        strategy.max_position_size,
+                        exit_type  # Pass exit_type to fix SELL ENTRY validation
                     )
                     
                     # Skip trade if quantity is invalid
