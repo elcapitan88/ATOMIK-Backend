@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 
 from app.models.strategy_monetization import StrategyMonetization
-from app.models.strategy_purchases import StrategyPurchase
+from app.models.strategy_purchase import StrategyPurchase
 from app.models.webhook import Webhook
 from app.models.user import User
 

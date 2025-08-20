@@ -1324,7 +1324,7 @@ async def get_user_strategy_subscriptions(
     Get all strategy subscriptions for the current user.
     """
     try:
-        from app.models.strategy_purchases import StrategyPurchase
+        from app.models.strategy_purchase import StrategyPurchase
         from app.models.strategy_monetization import StrategyMonetization
         from app.services.stripe_connect_service import StripeConnectService
         
@@ -1399,7 +1399,7 @@ async def cancel_strategy_subscription(
     Cancel a user's strategy subscription.
     """
     try:
-        from app.models.strategy_purchases import StrategyPurchase
+        from app.models.strategy_purchase import StrategyPurchase
         from app.services.stripe_connect_service import StripeConnectService
         
         # Verify ownership
