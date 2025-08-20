@@ -1281,6 +1281,38 @@ async def sync_resource_counts(
             detail=f"Failed to synchronize resource counts: {str(e)}"
         )
 
+@router.post("/admin/setup-monetization")
+async def setup_monetization_system(
+    admin_key: str = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin endpoint to set up missing monetization records for strategies with purchases.
+    This is needed when the monetization system wasn't properly initialized.
+    """
+    # Simple admin key check - in production, use proper admin auth
+    if admin_key != settings.ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+    
+    try:
+        from app.services.monetization_setup_service import MonetizationSetupService
+        
+        monetization_service = MonetizationSetupService(db)
+        records_created = monetization_service.create_missing_monetization_records()
+        
+        return {
+            "status": "success",
+            "message": f"Created {records_created} monetization records",
+            "records_created": records_created
+        }
+        
+    except Exception as e:
+        logger.error(f"Error setting up monetization system: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to set up monetization system: {str(e)}"
+        )
+
 # Strategy Subscription Endpoints
 
 @router.get("/strategy-subscriptions")
