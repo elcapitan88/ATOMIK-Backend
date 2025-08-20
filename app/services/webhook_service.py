@@ -34,6 +34,7 @@ class WebhookProcessor:
         key_data = {
             "webhook_id": webhook_id,
             "action": payload.get("action"),
+            "comment": payload.get("comment", ""),
             "timestamp": payload.get("timestamp", ""),
             "source": payload.get("source", "")
         }
@@ -587,6 +588,7 @@ class RailwayOptimizedWebhookProcessor:
         key_data = {
             "webhook_id": webhook_id,
             "action": payload.get("action"),
+            "comment": payload.get("comment", ""),
             "timestamp": payload.get("timestamp", ""),
             "source": payload.get("source", "")
         }
