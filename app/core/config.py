@@ -146,7 +146,7 @@ class Settings(BaseSettings):
     MAINTENANCE_MODE_MESSAGE: str = "The application is currently under maintenance. Please try again later."
 
     # CORS Settings
-    CORS_ORIGINS: str = "http://localhost:3000,https://atomik-frontend-development.up.railway.app"
+    CORS_ORIGINS: str = "http://localhost:3000,https://atomik-frontend-development.up.railway.app,https://www.atomiktrading.io"
 
     # Redis Settings
     REDIS_URL: Optional[str] = "redis://localhost:6379"
