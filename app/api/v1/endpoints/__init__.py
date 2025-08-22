@@ -2,6 +2,7 @@
 
 # Import all endpoint modules to make them available for import
 from . import auth
+from . import aria
 from . import binance
 from . import broker
 from . import futures_contracts
@@ -17,6 +18,7 @@ from . import marketplace
 
 __all__ = [
     "auth",
+    "aria",
     "binance", 
     "broker",
     "futures_contracts",
