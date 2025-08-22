@@ -64,10 +64,24 @@ class Settings(BaseSettings):
     def active_database_url(self) -> str:
         """Get the optimal database URL based on where we're running"""
         
-        # Check if we're running ON Railway
+        # For development environment, prioritize public URL
+        if self.ENVIRONMENT == "development":
+            # Try to use a public URL if available
+            if self.DEV_DATABASE_URL:
+                # If DEV_DATABASE_URL contains 'railway.internal', try to use DATABASE_URL instead
+                if 'railway.internal' in self.DEV_DATABASE_URL and self.DATABASE_URL and 'railway.internal' not in self.DATABASE_URL:
+                    logger.info(f"Using DATABASE_URL (public) for development environment")
+                    return self.DATABASE_URL
+                logger.info(f"Using DEV_DATABASE_URL for development environment")
+                return self.DEV_DATABASE_URL
+            elif self.DATABASE_URL:
+                logger.info(f"Using DATABASE_URL for development environment")
+                return self.DATABASE_URL
+        
+        # Check if we're running ON Railway in production
         is_on_railway = os.getenv("RAILWAY_ENVIRONMENT") is not None
         
-        if is_on_railway:
+        if is_on_railway and self.ENVIRONMENT == "production":
             # Check for Railway's template variable (internal connection)
             railway_private_url = os.getenv("DATABASE_PRIVATE_URL")
             if railway_private_url:
@@ -77,8 +91,6 @@ class Settings(BaseSettings):
         # Fallback to standard URL logic (works for both local and Railway)
         if self.ENVIRONMENT == "production" and self.PROD_DATABASE_URL:
             return self.PROD_DATABASE_URL
-        elif self.ENVIRONMENT == "development" and self.DEV_DATABASE_URL:
-            return self.DEV_DATABASE_URL
         
         # Ensure we have a database URL
         if not self.DATABASE_URL:
