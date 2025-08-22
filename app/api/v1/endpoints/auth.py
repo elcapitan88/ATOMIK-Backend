@@ -215,45 +215,49 @@ async def login(
                 }
             }
 
-        # Verify subscription status
-        stripe_service = StripeService()
-        
-        try:
-            subscription = db.query(Subscription).filter(
-                Subscription.user_id == user.id
-            ).first()
-        except Exception as e:
-            # Handle enum loading issues - fix dunning_stage data
-            logger.warning(f"Subscription loading error for {user.email}: {e}")
-            if "'none' is not among the defined enum values" in str(e):
-                # Fix the enum data directly in database
-                from sqlalchemy import text
-                db.execute(text("UPDATE subscriptions SET dunning_stage = 'none' WHERE user_id = :user_id AND dunning_stage IS NULL"), {"user_id": user.id})
-                db.commit()
-                # Retry loading
+        # Skip subscription verification in development environment
+        if settings.ENVIRONMENT == "development":
+            logger.info(f"Development mode: Skipping subscription check for user {user.email}")
+        else:
+            # Verify subscription status for production
+            stripe_service = StripeService()
+            
+            try:
                 subscription = db.query(Subscription).filter(
                     Subscription.user_id == user.id
                 ).first()
-            else:
-                raise e
+            except Exception as e:
+                # Handle enum loading issues - fix dunning_stage data
+                logger.warning(f"Subscription loading error for {user.email}: {e}")
+                if "'none' is not among the defined enum values" in str(e):
+                    # Fix the enum data directly in database
+                    from sqlalchemy import text
+                    db.execute(text("UPDATE subscriptions SET dunning_stage = 'none' WHERE user_id = :user_id AND dunning_stage IS NULL"), {"user_id": user.id})
+                    db.commit()
+                    # Retry loading
+                    subscription = db.query(Subscription).filter(
+                        Subscription.user_id == user.id
+                    ).first()
+                else:
+                    raise e
 
-        if not subscription:
-            logger.warning(f"No subscription found for user {user.email}")
-            raise HTTPException(
-                status_code=403,
-                detail="No active subscription found"
+            if not subscription:
+                logger.warning(f"No subscription found for user {user.email}")
+                raise HTTPException(
+                    status_code=403,
+                    detail="No active subscription found"
+                )
+
+            has_active_subscription = await stripe_service.verify_subscription_status(
+                subscription.stripe_customer_id
             )
 
-        has_active_subscription = await stripe_service.verify_subscription_status(
-            subscription.stripe_customer_id
-        )
-
-        if not has_active_subscription:
-            logger.warning(f"Inactive subscription for user {user.email}")
-            raise HTTPException(
-                status_code=403,
-                detail="Your subscription is not active"
-            )
+            if not has_active_subscription:
+                logger.warning(f"Inactive subscription for user {user.email}")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Your subscription is not active"
+                )
 
         # Create access token only after subscription verification
         access_token = create_access_token(subject=user.email)
