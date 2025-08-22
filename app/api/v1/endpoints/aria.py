@@ -8,7 +8,8 @@ import logging
 from ....services.aria_assistant import ARIAAssistant
 from ....models.user import User
 from ....models.aria_context import UserTradingProfile
-from ....core.deps import get_db, get_current_active_user
+from ....core.security import get_current_user
+from ....db.base import get_db
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class ARIAContextResponse(BaseModel):
 async def aria_chat(
     request: ARIAMessageRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Main ARIA chat endpoint for text and voice interactions
@@ -90,7 +91,7 @@ async def aria_chat(
 async def aria_voice_command(
     request: ARIAMessageRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Specialized endpoint for voice commands with optimized processing
@@ -124,7 +125,7 @@ async def aria_voice_command(
 async def aria_confirmation(
     request: ARIAConfirmationRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Handle user confirmations for pending actions
@@ -155,7 +156,7 @@ async def aria_confirmation(
 @router.get("/context", response_model=ARIAContextResponse)
 async def get_aria_context(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get comprehensive user context for ARIA
@@ -268,7 +269,7 @@ async def aria_health_check(
 @router.post("/voice/start-session")
 async def start_voice_session(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Start a voice interaction session (future: WebRTC, real-time processing)
@@ -293,7 +294,7 @@ async def start_voice_session(
 async def end_voice_session(
     session_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     End a voice interaction session
@@ -320,7 +321,7 @@ async def end_voice_session(
 async def get_aria_analytics(
     days: int = 7,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get ARIA interaction analytics for the user
