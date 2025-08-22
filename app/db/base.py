@@ -41,6 +41,7 @@ from app.models.creator_profile import CreatorProfile  # noqa
 from app.models.strategy_pricing import StrategyPricing  # noqa
 from app.models.strategy_purchase import StrategyPurchase  # noqa
 from app.models.creator_earnings import CreatorEarnings  # noqa
+from app.models.aria_context import UserTradingProfile, UserTradingSession, ARIAInteraction, ARIAContextCache  # noqa
 
 # Create a dependency for FastAPI endpoints
 def get_db():

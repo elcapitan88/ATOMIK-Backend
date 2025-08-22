@@ -57,6 +57,9 @@ class User(Base):
     # TODO: Uncomment after creator_dashboard_cache table migration is fixed
     # dashboard_cache = relationship("CreatorDashboardCache", back_populates="creator", cascade="all, delete-orphan")
     
+    # ARIA Assistant relationships
+    trading_profile = relationship("UserTradingProfile", back_populates="user", uselist=False)
+    
     def __str__(self):
         return f"User(email={self.email})"
     
