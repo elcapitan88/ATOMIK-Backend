@@ -44,6 +44,7 @@ class User(Base):
     webhooks = relationship("Webhook", back_populates="user", cascade="all, delete-orphan")
     broker_accounts = relationship("BrokerAccount", back_populates="user", cascade="all, delete-orphan")
     strategies = relationship("ActivatedStrategy", back_populates="user", cascade="all, delete-orphan")
+    strategy_codes = relationship("StrategyCode", back_populates="user", cascade="all, delete-orphan")
     subscription = relationship("Subscription", back_populates="user", uselist=False)
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
     trades = relationship("Trade", back_populates="user", cascade="all, delete-orphan")

@@ -8,7 +8,7 @@ logger.info("Starting API router imports...")
 
 try:
     from .endpoints import auth, broker, subscription, webhooks, strategy, tradovate, binance, futures_contracts
-    from .endpoints import strategy_monetization, creator_analytics
+    from .endpoints import strategy_monetization, creator_analytics, strategy_execution, strategy_codes
     logger.info("Basic endpoints imported successfully")
     
     from .endpoints import admin
@@ -39,6 +39,8 @@ api_router.include_router(broker.router, prefix="/brokers", tags=["brokers"])
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(strategy.router, prefix="/strategies", tags=["strategies"])
+api_router.include_router(strategy_codes.router, prefix="/strategies", tags=["strategy-codes"])
+api_router.include_router(strategy_execution.router, prefix="/trades", tags=["strategy-execution"])
 # Old monetization system removed - consolidated into marketplace
 # api_router.include_router(strategy_monetization.router, prefix="/strategies", tags=["strategy-monetization"])
 api_router.include_router(creator_analytics.router, prefix="/analytics", tags=["creator-analytics"])

@@ -183,7 +183,10 @@ class Settings(BaseSettings):
     DIGITAL_OCEAN_API_KEY: Optional[str] = None
     DIGITAL_OCEAN_REGION: str = "nyc1"
     DIGITAL_OCEAN_SIZE: str = "s-2vcpu-2gb"  # 2 vCPU, 2GB RAM, 50GB SSD - sufficient for 3.33GB snapshot
-    DIGITAL_OCEAN_IMAGE_ID: str = "192535402"  # Latest fresh Railway static egress IP snapshot 
+    DIGITAL_OCEAN_IMAGE_ID: str = "192535402"  # Latest fresh Railway static egress IP snapshot
+    
+    # Strategy Engine API Key
+    STRATEGY_ENGINE_API_KEY: Optional[str] = None 
 
     #Railway
     RAILWAY_API_KEY: Optional[str] = None
