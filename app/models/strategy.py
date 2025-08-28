@@ -34,7 +34,9 @@ class ActivatedStrategy(Base):
 
     # Strategy Type and Configuration
     strategy_type = Column(String(20), nullable=False)  # 'single' or 'multiple'
-    webhook_id = Column(String(64), ForeignKey("webhooks.token"), index=True)
+    execution_type = Column(String(20), nullable=False, default='webhook', index=True)  # 'webhook' or 'engine'
+    webhook_id = Column(String(64), ForeignKey("webhooks.token"), index=True, nullable=True)
+    strategy_code_id = Column(Integer, ForeignKey("strategy_codes.id"), index=True, nullable=True)
     ticker = Column(String(10), nullable=False)
 
     # Single Strategy Fields
@@ -76,6 +78,7 @@ class ActivatedStrategy(Base):
     notes = Column(Text, nullable=True)
     tags = Column(Text, nullable=True)  # Comma-separated tags
     custom_settings = Column(Text, nullable=True)  # JSON string for custom settings
+    engine_settings = Column(Text, nullable=True)  # JSON string for Strategy Engine specific settings
 
     # Broker Settings
     broker_id = Column(String(50), nullable=True)  # Identifier for the broker
@@ -92,8 +95,13 @@ class ActivatedStrategy(Base):
     webhook = relationship(
         "Webhook",
         primaryjoin="ActivatedStrategy.webhook_id == Webhook.token",
-        foreign_keys=[webhook_id],  # Add this line
+        foreign_keys=[webhook_id],
         back_populates="strategies"
+    )
+    strategy_code = relationship(
+        "StrategyCode",
+        foreign_keys=[strategy_code_id],
+        back_populates="activated_strategies"
     )
 
     
@@ -308,4 +316,35 @@ class ActivatedStrategy(Base):
         return f"Strategy {self.id} - {self.ticker} ({self.strategy_type})"
 
     def __repr__(self):
-        return f"<ActivatedStrategy(id={self.id}, type={self.strategy_type}, ticker={self.ticker})>"
+        return f"<ActivatedStrategy(id={self.id}, type={self.strategy_type}, ticker={self.ticker}, execution={self.execution_type})>"
+    
+    def is_webhook_strategy(self) -> bool:
+        """Check if this is a webhook-based strategy."""
+        return self.execution_type == 'webhook'
+    
+    def is_engine_strategy(self) -> bool:
+        """Check if this is a Strategy Engine strategy."""
+        return self.execution_type == 'engine'
+    
+    def get_strategy_source(self):
+        """Get the strategy source (webhook or strategy code)."""
+        if self.is_webhook_strategy():
+            return self.webhook
+        elif self.is_engine_strategy():
+            return self.strategy_code
+        return None
+    
+    def get_engine_settings(self) -> dict:
+        """Get Strategy Engine settings as dictionary."""
+        if not self.engine_settings:
+            return {}
+        import json
+        try:
+            return json.loads(self.engine_settings)
+        except json.JSONDecodeError:
+            return {}
+    
+    def set_engine_settings(self, settings: dict):
+        """Set Strategy Engine settings from dictionary."""
+        import json
+        self.engine_settings = json.dumps(settings) if settings else None

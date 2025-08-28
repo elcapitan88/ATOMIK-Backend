@@ -45,6 +45,7 @@ class StrategyCode(Base):
 
     # Relationships
     user = relationship("User", back_populates="strategy_codes")
+    activated_strategies = relationship("ActivatedStrategy", back_populates="strategy_code")
 
     def __repr__(self):
         return f"<StrategyCode(id={self.id}, name='{self.name}', user_id={self.user_id}, active={self.is_active})>"

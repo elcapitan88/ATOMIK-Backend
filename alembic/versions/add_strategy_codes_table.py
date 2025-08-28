@@ -18,6 +18,18 @@ depends_on = None
 
 def upgrade():
     """Add strategy_codes table."""
+    # Check if table already exists
+    from sqlalchemy import inspect
+    from alembic import context
+    
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    tables = inspector.get_table_names()
+    
+    if 'strategy_codes' in tables:
+        # Table already exists, skip creation
+        return
+    
     op.create_table(
         'strategy_codes',
         sa.Column('id', sa.Integer(), nullable=False),

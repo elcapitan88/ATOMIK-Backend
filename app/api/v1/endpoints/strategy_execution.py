@@ -10,6 +10,7 @@ from ....core.config import settings
 from ....schemas.webhook import WebhookPayload
 from ....db.session import get_db
 from ....models.strategy import ActivatedStrategy
+from ....models.strategy_code import StrategyCode
 from ....models.webhook import Webhook
 from ....services.strategy_service import StrategyProcessor
 
@@ -61,90 +62,111 @@ async def execute_strategy_signal(
     try:
         logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} {signal.symbol} x{signal.quantity}")
         
-        # Find an active strategy for this signal
-        # First, look for a strategy-engine specific configuration
-        strategy = db.query(ActivatedStrategy).filter(
-            ActivatedStrategy.ticker == signal.symbol,
-            ActivatedStrategy.is_active == True,
-            # Could filter by strategy_name in webhook details
+        # Find active Engine strategy configurations for this signal
+        # Step 1: Find the strategy code by name
+        strategy_code = db.query(StrategyCode).filter(
+            StrategyCode.name == signal.strategy_name,
+            StrategyCode.is_active == True
         ).first()
         
-        if not strategy:
-            # Create a temporary strategy for this execution
-            # In production, this would be configured ahead of time
-            logger.warning(f"No active strategy found for {signal.symbol}, using default configuration")
-            
-            # Find a suitable broker account (prefer paper/demo for testing)
-            from ....models.broker import BrokerAccount
-            broker_account = db.query(BrokerAccount).filter(
-                BrokerAccount.is_active == True
-            ).first()
-            
-            if not broker_account:
-                raise HTTPException(
-                    status_code=503,
-                    detail="No active broker account available for execution"
-                )
-            
-            # Create temporary strategy configuration
-            strategy = ActivatedStrategy(
-                user_id=broker_account.user_id,
-                strategy_type='single',
-                ticker=signal.symbol,
-                account_id=broker_account.account_id,
-                quantity=signal.quantity,
-                is_active=True,
-                webhook_id=f"strategy_engine_{signal.strategy_name}"  # Virtual webhook ID
-            )
-            
-            # Note: Not persisting this temporary strategy to DB
-        
-        # Convert signal to webhook payload format for StrategyProcessor
-        signal_data = {
-            "action": signal.action.upper(),
-            "comment": signal.comment or "",
-            "timestamp": signal.timestamp,
-            "source": "strategy_engine",
-            "strategy_name": signal.strategy_name,
-            "price": signal.price
-        }
-        
-        # Execute through the existing StrategyProcessor
-        strategy_processor = StrategyProcessor(db)
-        
-        try:
-            result = await strategy_processor.execute_strategy(strategy, signal_data)
-            
-            # Check if execution was successful
-            if result.get("status") == "success":
-                logger.info(f"Strategy signal executed successfully: {result}")
-                
-                return {
-                    "success": True,
-                    "execution_id": result.get("order_id"),
-                    "broker_order_id": result.get("order_details", {}).get("order_id"),
-                    "filled_price": result.get("order_details", {}).get("price", signal.price),
-                    "filled_quantity": signal.quantity,
-                    "status": "filled",
-                    "message": f"Order executed: {signal.action} {signal.quantity}x {signal.symbol}",
-                    "details": result
-                }
-            else:
-                logger.warning(f"Strategy signal execution failed: {result}")
-                
-                return {
-                    "success": False,
-                    "status": result.get("status", "failed"),
-                    "message": result.get("reason", "Execution failed"),
-                    "details": result
-                }
-                
-        except Exception as exec_error:
-            logger.error(f"Execution error: {str(exec_error)}")
+        if not strategy_code:
             raise HTTPException(
-                status_code=500,
-                detail=f"Execution failed: {str(exec_error)}"
+                status_code=404,
+                detail=f"No active strategy code found with name '{signal.strategy_name}'"
             )
+        
+        # Step 2: Find activated Engine strategies using this strategy code and symbol
+        engine_strategies = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.strategy_code_id == strategy_code.id,
+            ActivatedStrategy.execution_type == 'engine',
+            ActivatedStrategy.ticker == signal.symbol,
+            ActivatedStrategy.is_active == True
+        ).all()
+        
+        if not engine_strategies:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No active Engine strategies found for '{signal.strategy_name}' on symbol '{signal.symbol}'"
+            )
+        
+        logger.info(f"Found {len(engine_strategies)} active Engine strategies for {signal.strategy_name} on {signal.symbol}")
+        
+        execution_results = []
+        
+        # Execute signal on all configured Engine strategies
+        for strategy in engine_strategies:
+            try:
+                logger.info(f"Executing on strategy {strategy.id} for user {strategy.user_id}, account {strategy.account_id}, quantity {strategy.quantity}")
+        
+                # Convert signal to webhook payload format for StrategyProcessor
+                # Use the strategy's configured quantity, not the signal quantity
+                signal_data = {
+                    "action": signal.action.upper(),
+                    "comment": signal.comment or "",
+                    "timestamp": signal.timestamp,
+                    "source": "strategy_engine",
+                    "strategy_name": signal.strategy_name,
+                    "price": signal.price,
+                    "ticker": signal.symbol
+                }
+                
+                # Execute through the existing StrategyProcessor
+                strategy_processor = StrategyProcessor(db)
+                
+                result = await strategy_processor.execute_strategy(strategy, signal_data)
+                
+                # Track execution result
+                execution_result = {
+                    "strategy_id": strategy.id,
+                    "user_id": strategy.user_id,
+                    "account_id": strategy.account_id,
+                    "configured_quantity": strategy.quantity,
+                    "success": result.get("status") == "success",
+                    "result": result
+                }
+                
+                if result.get("status") == "success":
+                    execution_result.update({
+                        "execution_id": result.get("order_id"),
+                        "broker_order_id": result.get("order_details", {}).get("order_id"),
+                        "filled_price": result.get("order_details", {}).get("price", signal.price),
+                        "status": "filled"
+                    })
+                    logger.info(f"Strategy {strategy.id} executed successfully: {result}")
+                else:
+                    execution_result.update({
+                        "status": result.get("status", "failed"),
+                        "error": result.get("reason", "Execution failed")
+                    })
+                    logger.warning(f"Strategy {strategy.id} execution failed: {result}")
+                
+                execution_results.append(execution_result)
+                
+            except Exception as exec_error:
+                logger.error(f"Execution error for strategy {strategy.id}: {str(exec_error)}")
+                execution_results.append({
+                    "strategy_id": strategy.id,
+                    "user_id": strategy.user_id,
+                    "account_id": strategy.account_id,
+                    "success": False,
+                    "error": str(exec_error)
+                })
+        
+        # Compile overall execution summary
+        successful_executions = [r for r in execution_results if r.get("success")]
+        failed_executions = [r for r in execution_results if not r.get("success")]
+        
+        return {
+            "signal_processed": True,
+            "strategy_name": signal.strategy_name,
+            "symbol": signal.symbol,
+            "action": signal.action,
+            "total_strategies": len(execution_results),
+            "successful_executions": len(successful_executions),
+            "failed_executions": len(failed_executions),
+            "execution_details": execution_results,
+            "message": f"Processed signal for {len(execution_results)} strategies: {len(successful_executions)} successful, {len(failed_executions)} failed"
+        }
         
     except HTTPException:
         raise

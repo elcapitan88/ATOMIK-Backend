@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Response
+from fastapi import APIRouter, Depends, HTTPException, Header, Response, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Union, Optional, Dict, Any
 import logging
 import traceback
+import json
 from pydantic import ValidationError
 from app.core.config import settings
 from decimal import Decimal
@@ -25,8 +26,13 @@ from app.schemas.strategy import (
     StrategyInDB,
     StrategyResponse,
     StrategyType,
-    StrategyStats
+    StrategyStats,
+    EngineStrategyCreate,
+    EngineStrategyResponse,
+    EngineStrategyUpdate,
+    ExecutionType
 )
+from app.models.strategy_code import StrategyCode
 from app.utils.ticker_utils import get_display_ticker, validate_ticker
 from app.core.permissions import (
     check_subscription, 
@@ -90,35 +96,58 @@ async def activate_strategy(
         logger.info(f"Creating strategy for user {current_user.id}")
         logger.debug(f"Strategy data received: {strategy.dict()}")
 
-        # Updated webhook validation to support subscriptions
-        webhook = db.query(Webhook).filter(
-            Webhook.token == str(strategy.webhook_id)
-        ).first()
-
-        if not webhook:
-            raise HTTPException(status_code=404, detail="Webhook not found")
-
-        # Check if user has access to this webhook
-        is_owner = webhook.user_id == current_user.id
+        # Determine execution type and validate strategy source
+        webhook = None
+        strategy_code = None
+        execution_type = 'webhook'
         
-        # Check free subscription access
-        is_subscriber = db.query(WebhookSubscription).filter(
-            WebhookSubscription.webhook_id == webhook.id,
-            WebhookSubscription.user_id == current_user.id
-        ).first() is not None
-        
-        # Check purchased strategy access (for monetized strategies)
-        has_purchase = db.query(StrategyPurchase).filter(
-            StrategyPurchase.webhook_id == webhook.id,
-            StrategyPurchase.user_id == current_user.id,
-            StrategyPurchase.status == "COMPLETED"
-        ).first() is not None
+        if strategy.webhook_id:
+            # Webhook-based strategy validation
+            webhook = db.query(Webhook).filter(
+                Webhook.token == str(strategy.webhook_id)
+            ).first()
 
-        if not (is_owner or is_subscriber or has_purchase):
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have access to this webhook"
-            )
+            if not webhook:
+                raise HTTPException(status_code=404, detail="Webhook not found")
+
+            # Check if user has access to this webhook
+            is_owner = webhook.user_id == current_user.id
+            
+            # Check free subscription access
+            is_subscriber = db.query(WebhookSubscription).filter(
+                WebhookSubscription.webhook_id == webhook.id,
+                WebhookSubscription.user_id == current_user.id
+            ).first() is not None
+            
+            # Check purchased strategy access (for monetized strategies)
+            has_purchase = db.query(StrategyPurchase).filter(
+                StrategyPurchase.webhook_id == webhook.id,
+                StrategyPurchase.user_id == current_user.id,
+                StrategyPurchase.status == "COMPLETED"
+            ).first() is not None
+
+            if not (is_owner or is_subscriber or has_purchase):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You don't have access to this webhook"
+                )
+            execution_type = 'webhook'
+            
+        elif strategy.strategy_code_id:
+            # Engine-based strategy validation
+            from ...models.strategy_code import StrategyCode
+            strategy_code = db.query(StrategyCode).filter(
+                StrategyCode.id == strategy.strategy_code_id,
+                StrategyCode.user_id == current_user.id,
+                StrategyCode.is_active == True
+            ).first()
+            
+            if not strategy_code:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Strategy code not found or not accessible"
+                )
+            execution_type = 'engine'
 
         # Validate and convert ticker to display format
         valid, _ = validate_ticker(strategy.ticker)
@@ -149,24 +178,32 @@ async def activate_strategy(
                         detail=f"Broker account {strategy.account_id} not found or inactive"
                     )
 
-                # Check for existing strategy with same webhook and account
-                existing_strategy = db.query(ActivatedStrategy).filter(
-                    ActivatedStrategy.webhook_id == str(strategy.webhook_id),
-                    ActivatedStrategy.account_id == str(strategy.account_id),
-                    ActivatedStrategy.user_id == current_user.id
-                ).first()
+                # Check for existing strategy with same source and account
+                if execution_type == 'webhook':
+                    existing_strategy = db.query(ActivatedStrategy).filter(
+                        ActivatedStrategy.webhook_id == str(strategy.webhook_id),
+                        ActivatedStrategy.account_id == str(strategy.account_id),
+                        ActivatedStrategy.user_id == current_user.id
+                    ).first()
+                    error_detail = "A strategy with this webhook and account already exists"
+                else:  # engine
+                    existing_strategy = db.query(ActivatedStrategy).filter(
+                        ActivatedStrategy.strategy_code_id == strategy.strategy_code_id,
+                        ActivatedStrategy.account_id == str(strategy.account_id),
+                        ActivatedStrategy.user_id == current_user.id
+                    ).first()
+                    error_detail = "A strategy with this strategy code and account already exists"
 
                 if existing_strategy:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="A strategy with this webhook and account already exists"
-                    )
+                    raise HTTPException(status_code=400, detail=error_detail)
                 
-                # Create single account strategy
+                # Create single account strategy with appropriate execution type
                 db_strategy = ActivatedStrategy(
                     user_id=current_user.id,
                     strategy_type="single",
-                    webhook_id=str(strategy.webhook_id),
+                    execution_type=execution_type,
+                    webhook_id=str(strategy.webhook_id) if strategy.webhook_id else None,
+                    strategy_code_id=strategy.strategy_code_id if strategy.strategy_code_id else None,
                     ticker=display_ticker,
                     account_id=str(strategy.account_id),
                     quantity=strategy.quantity,
@@ -274,11 +311,13 @@ async def activate_strategy(
 
                     follower_accounts.append(follower)
 
-                # Create multiple account strategy
+                # Create multiple account strategy with appropriate execution type
                 db_strategy = ActivatedStrategy(
                     user_id=current_user.id,
                     strategy_type="multiple",
-                    webhook_id=str(strategy.webhook_id),
+                    execution_type=execution_type,
+                    webhook_id=str(strategy.webhook_id) if strategy.webhook_id else None,
+                    strategy_code_id=strategy.strategy_code_id if strategy.strategy_code_id else None,
                     ticker=display_ticker,
                     leader_account_id=leader_account.account_id,
                     leader_quantity=strategy.leader_quantity,
@@ -789,6 +828,441 @@ async def delete_strategy(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting strategy: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete strategy: {str(e)}"
+        )
+
+
+# Strategy Engine Endpoints
+
+@router.post("/engine/configure", response_model=EngineStrategyResponse)
+@check_subscription
+@check_resource_limit("active_strategies")
+async def configure_engine_strategy(
+    *,
+    db: Session = Depends(get_db),
+    strategy: EngineStrategyCreate,
+    current_user = Depends(get_current_user),
+    response: Response = None
+):
+    """
+    Configure a Strategy Engine strategy for automated execution.
+    Links a StrategyCode to broker accounts with trading parameters.
+    """
+    try:
+        logger.info(f"Configuring Engine strategy for user {current_user.id}")
+        
+        # Validate strategy code exists and belongs to user
+        strategy_code = db.query(StrategyCode).filter(
+            StrategyCode.id == strategy.strategy_code_id,
+            StrategyCode.user_id == current_user.id
+        ).first()
+        
+        if not strategy_code:
+            raise HTTPException(
+                status_code=404,
+                detail="Strategy code not found or access denied"
+            )
+        
+        if not strategy_code.is_validated:
+            raise HTTPException(
+                status_code=400,
+                detail="Strategy code must be validated before activation"
+            )
+        
+        # Validate ticker format
+        valid, _ = validate_ticker(strategy.ticker)
+        if not valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid ticker format: {strategy.ticker}"
+            )
+        
+        display_ticker = get_display_ticker(strategy.ticker)
+        
+        # Check for existing active strategy for same code + ticker
+        existing_strategy = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.strategy_code_id == strategy.strategy_code_id,
+            ActivatedStrategy.ticker == display_ticker,
+            ActivatedStrategy.user_id == current_user.id,
+            ActivatedStrategy.is_active == True
+        ).first()
+        
+        if existing_strategy:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Strategy '{strategy_code.name}' is already active for {display_ticker}"
+            )
+        
+        # Validate broker accounts based on strategy type
+        if strategy.strategy_type == StrategyType.SINGLE:
+            if not strategy.account_id or not strategy.quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Single strategy requires account_id and quantity"
+                )
+            
+            # Validate broker account
+            broker_account = db.query(BrokerAccount).filter(
+                BrokerAccount.account_id == strategy.account_id,
+                BrokerAccount.user_id == current_user.id,
+                BrokerAccount.is_active == True
+            ).first()
+            
+            if not broker_account:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Broker account {strategy.account_id} not found or inactive"
+                )
+        
+        elif strategy.strategy_type == StrategyType.MULTIPLE:
+            if not strategy.leader_account_id or not strategy.leader_quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Multiple strategy requires leader_account_id and leader_quantity"
+                )
+            
+            # Validate leader account
+            leader_account = db.query(BrokerAccount).filter(
+                BrokerAccount.account_id == strategy.leader_account_id,
+                BrokerAccount.user_id == current_user.id,
+                BrokerAccount.is_active == True
+            ).first()
+            
+            if not leader_account:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Leader account {strategy.leader_account_id} not found or inactive"
+                )
+        
+        # Create engine settings JSON
+        engine_settings = {
+            "enable_paper_trading": strategy.enable_paper_trading,
+            "enable_live_trading": strategy.enable_live_trading,
+            "max_signals_per_day": strategy.max_signals_per_day,
+        }
+        
+        # Create new ActivatedStrategy for Strategy Engine
+        new_strategy = ActivatedStrategy(
+            user_id=current_user.id,
+            strategy_type=strategy.strategy_type.value,
+            execution_type='engine',  # Key difference from webhook strategies
+            strategy_code_id=strategy.strategy_code_id,
+            ticker=display_ticker,
+            
+            # Single strategy fields
+            account_id=strategy.account_id,
+            quantity=strategy.quantity,
+            
+            # Multiple strategy fields
+            leader_account_id=strategy.leader_account_id,
+            leader_quantity=strategy.leader_quantity,
+            group_name=strategy.group_name,
+            
+            # Risk management
+            max_position_size=strategy.max_position_size,
+            stop_loss_percent=strategy.stop_loss_percent,
+            take_profit_percent=strategy.take_profit_percent,
+            max_daily_loss=strategy.max_daily_loss,
+            
+            # Engine settings
+            engine_settings=json.dumps(engine_settings),
+            
+            # Status
+            is_active=True,
+            description=f"Strategy Engine: {strategy_code.name}",
+            notes=f"Automated strategy: {strategy_code.name}",
+        )
+        
+        db.add(new_strategy)
+        
+        # Update subscription counter
+        subscription = db.query(Subscription).filter(
+            Subscription.user_id == current_user.id
+        ).first()
+        
+        if subscription:
+            subscription.active_strategies_count = (subscription.active_strategies_count or 0) + 1
+        
+        db.commit()
+        db.refresh(new_strategy)
+        
+        # Build response
+        return EngineStrategyResponse(
+            id=new_strategy.id,
+            strategy_type=StrategyType(new_strategy.strategy_type),
+            execution_type=ExecutionType(new_strategy.execution_type),
+            strategy_code_id=new_strategy.strategy_code_id,
+            ticker=new_strategy.ticker,
+            is_active=new_strategy.is_active,
+            created_at=new_strategy.created_at,
+            last_triggered=new_strategy.last_triggered,
+            strategy_code={
+                "id": strategy_code.id,
+                "name": strategy_code.name,
+                "description": strategy_code.description,
+                "symbols": strategy_code.symbols_list
+            },
+            account_id=new_strategy.account_id,
+            quantity=new_strategy.quantity,
+            leader_account_id=new_strategy.leader_account_id,
+            leader_quantity=new_strategy.leader_quantity,
+            group_name=new_strategy.group_name,
+            max_position_size=new_strategy.max_position_size,
+            stop_loss_percent=float(new_strategy.stop_loss_percent) if new_strategy.stop_loss_percent else None,
+            take_profit_percent=float(new_strategy.take_profit_percent) if new_strategy.take_profit_percent else None,
+            max_daily_loss=float(new_strategy.max_daily_loss) if new_strategy.max_daily_loss else None,
+            engine_settings=new_strategy.get_engine_settings(),
+            stats=StrategyStats(
+                total_trades=new_strategy.total_trades or 0,
+                successful_trades=new_strategy.successful_trades or 0,
+                failed_trades=new_strategy.failed_trades or 0,
+                total_pnl=new_strategy.total_pnl or Decimal('0'),
+                win_rate=float(new_strategy.win_rate) if new_strategy.win_rate else None,
+                max_drawdown=new_strategy.max_drawdown,
+                sharpe_ratio=float(new_strategy.sharpe_ratio) if new_strategy.sharpe_ratio else None,
+                average_win=new_strategy.average_win,
+                average_loss=new_strategy.average_loss
+            )
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error configuring Engine strategy: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to configure strategy: {str(e)}"
+        )
+
+
+@router.get("/engine/list", response_model=List[EngineStrategyResponse])
+@check_subscription
+async def list_engine_strategies(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+    active_only: bool = Query(True, description="Show only active strategies")
+):
+    """List all Strategy Engine configurations for the current user."""
+    try:
+        query = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id,
+            ActivatedStrategy.execution_type == 'engine'
+        ).options(joinedload(ActivatedStrategy.strategy_code))
+        
+        if active_only:
+            query = query.filter(ActivatedStrategy.is_active == True)
+        
+        strategies = query.order_by(ActivatedStrategy.created_at.desc()).all()
+        
+        # Build response list
+        response = []
+        for strategy in strategies:
+            strategy_code = strategy.strategy_code
+            
+            response.append(EngineStrategyResponse(
+                id=strategy.id,
+                strategy_type=StrategyType(strategy.strategy_type),
+                execution_type=ExecutionType(strategy.execution_type),
+                strategy_code_id=strategy.strategy_code_id,
+                ticker=strategy.ticker,
+                is_active=strategy.is_active,
+                created_at=strategy.created_at,
+                last_triggered=strategy.last_triggered,
+                strategy_code={
+                    "id": strategy_code.id,
+                    "name": strategy_code.name,
+                    "description": strategy_code.description,
+                    "symbols": strategy_code.symbols_list
+                } if strategy_code else None,
+                account_id=strategy.account_id,
+                quantity=strategy.quantity,
+                leader_account_id=strategy.leader_account_id,
+                leader_quantity=strategy.leader_quantity,
+                group_name=strategy.group_name,
+                max_position_size=strategy.max_position_size,
+                stop_loss_percent=float(strategy.stop_loss_percent) if strategy.stop_loss_percent else None,
+                take_profit_percent=float(strategy.take_profit_percent) if strategy.take_profit_percent else None,
+                max_daily_loss=float(strategy.max_daily_loss) if strategy.max_daily_loss else None,
+                engine_settings=strategy.get_engine_settings(),
+                stats=StrategyStats(
+                    total_trades=strategy.total_trades or 0,
+                    successful_trades=strategy.successful_trades or 0,
+                    failed_trades=strategy.failed_trades or 0,
+                    total_pnl=strategy.total_pnl or Decimal('0'),
+                    win_rate=float(strategy.win_rate) if strategy.win_rate else None,
+                    max_drawdown=strategy.max_drawdown,
+                    sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
+                    average_win=strategy.average_win,
+                    average_loss=strategy.average_loss
+                )
+            ))
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error listing Engine strategies: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list strategies: {str(e)}"
+        )
+
+
+@router.put("/engine/{strategy_id}", response_model=EngineStrategyResponse)
+@check_subscription
+async def update_engine_strategy(
+    strategy_id: int,
+    strategy_update: EngineStrategyUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Update a Strategy Engine configuration."""
+    try:
+        strategy = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.id == strategy_id,
+            ActivatedStrategy.user_id == current_user.id,
+            ActivatedStrategy.execution_type == 'engine'
+        ).options(joinedload(ActivatedStrategy.strategy_code)).first()
+        
+        if not strategy:
+            raise HTTPException(
+                status_code=404,
+                detail="Engine strategy not found"
+            )
+        
+        # Update fields
+        if strategy_update.is_active is not None:
+            strategy.is_active = strategy_update.is_active
+        
+        if strategy_update.quantity is not None:
+            strategy.quantity = strategy_update.quantity
+            
+        if strategy_update.leader_quantity is not None:
+            strategy.leader_quantity = strategy_update.leader_quantity
+        
+        # Update risk management
+        if strategy_update.stop_loss_percent is not None:
+            strategy.stop_loss_percent = Decimal(str(strategy_update.stop_loss_percent))
+            
+        if strategy_update.take_profit_percent is not None:
+            strategy.take_profit_percent = Decimal(str(strategy_update.take_profit_percent))
+            
+        if strategy_update.max_daily_loss is not None:
+            strategy.max_daily_loss = Decimal(str(strategy_update.max_daily_loss))
+        
+        # Update engine settings
+        engine_settings = strategy.get_engine_settings()
+        
+        if strategy_update.enable_paper_trading is not None:
+            engine_settings['enable_paper_trading'] = strategy_update.enable_paper_trading
+            
+        if strategy_update.enable_live_trading is not None:
+            engine_settings['enable_live_trading'] = strategy_update.enable_live_trading
+            
+        if strategy_update.max_signals_per_day is not None:
+            engine_settings['max_signals_per_day'] = strategy_update.max_signals_per_day
+        
+        strategy.set_engine_settings(engine_settings)
+        strategy.updated_at = datetime.utcnow()
+        
+        db.commit()
+        db.refresh(strategy)
+        
+        # Build response (reuse logic from list endpoint)
+        strategy_code = strategy.strategy_code
+        
+        return EngineStrategyResponse(
+            id=strategy.id,
+            strategy_type=StrategyType(strategy.strategy_type),
+            execution_type=ExecutionType(strategy.execution_type),
+            strategy_code_id=strategy.strategy_code_id,
+            ticker=strategy.ticker,
+            is_active=strategy.is_active,
+            created_at=strategy.created_at,
+            last_triggered=strategy.last_triggered,
+            strategy_code={
+                "id": strategy_code.id,
+                "name": strategy_code.name,
+                "description": strategy_code.description,
+                "symbols": strategy_code.symbols_list
+            } if strategy_code else None,
+            account_id=strategy.account_id,
+            quantity=strategy.quantity,
+            leader_account_id=strategy.leader_account_id,
+            leader_quantity=strategy.leader_quantity,
+            group_name=strategy.group_name,
+            max_position_size=strategy.max_position_size,
+            stop_loss_percent=float(strategy.stop_loss_percent) if strategy.stop_loss_percent else None,
+            take_profit_percent=float(strategy.take_profit_percent) if strategy.take_profit_percent else None,
+            max_daily_loss=float(strategy.max_daily_loss) if strategy.max_daily_loss else None,
+            engine_settings=strategy.get_engine_settings(),
+            stats=StrategyStats(
+                total_trades=strategy.total_trades or 0,
+                successful_trades=strategy.successful_trades or 0,
+                failed_trades=strategy.failed_trades or 0,
+                total_pnl=strategy.total_pnl or Decimal('0'),
+                win_rate=float(strategy.win_rate) if strategy.win_rate else None,
+                max_drawdown=strategy.max_drawdown,
+                sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
+                average_win=strategy.average_win,
+                average_loss=strategy.average_loss
+            )
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating Engine strategy: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update strategy: {str(e)}"
+        )
+
+
+@router.delete("/engine/{strategy_id}")
+@check_subscription
+async def delete_engine_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Delete a Strategy Engine configuration."""
+    try:
+        strategy = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.id == strategy_id,
+            ActivatedStrategy.user_id == current_user.id,
+            ActivatedStrategy.execution_type == 'engine'
+        ).first()
+        
+        if not strategy:
+            raise HTTPException(
+                status_code=404,
+                detail="Engine strategy not found"
+            )
+        
+        # Update subscription counter
+        subscription = db.query(Subscription).filter(
+            Subscription.user_id == current_user.id
+        ).first()
+        
+        if subscription and subscription.active_strategies_count:
+            subscription.active_strategies_count -= 1
+        
+        db.delete(strategy)
+        db.commit()
+        
+        return {"status": "success", "message": "Engine strategy deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting Engine strategy: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete strategy: {str(e)}"

@@ -9,6 +9,11 @@ class StrategyType(str, Enum):
     SINGLE = "single"
     MULTIPLE = "multiple"
 
+class ExecutionType(str, Enum):
+    """Enumeration of execution types"""
+    WEBHOOK = "webhook"
+    ENGINE = "engine"
+
 from pydantic import BaseModel, Field, validator, ConfigDict
 from typing import Optional
 from decimal import Decimal
@@ -176,10 +181,20 @@ class StrategyStats(BaseModel):
 class SingleStrategyCreate(BaseModel):
     """Schema for creating a single account strategy"""
     strategy_type: Literal[StrategyType.SINGLE]
-    webhook_id: str = Field(..., description="Webhook token")
+    webhook_id: Optional[str] = Field(None, description="Webhook token (for webhook-based strategies)")
+    strategy_code_id: Optional[int] = Field(None, description="Strategy code ID (for engine-based strategies)")
     ticker: str = Field(..., min_length=1, max_length=10)
     account_id: str = Field(..., description="Trading account identifier")
     quantity: int = Field(..., gt=0, description="Trading quantity")
+
+    @validator('strategy_code_id')
+    def validate_strategy_source(cls, v, values):
+        webhook_id = values.get('webhook_id')
+        if not webhook_id and not v:
+            raise ValueError('Either webhook_id or strategy_code_id must be provided')
+        if webhook_id and v:
+            raise ValueError('Only one of webhook_id or strategy_code_id can be provided')
+        return v
 
     @validator('ticker')
     def validate_ticker(cls, v):
@@ -201,13 +216,23 @@ class SingleStrategyCreate(BaseModel):
 class MultipleStrategyCreate(BaseModel):
     """Schema for creating a multiple account (group) strategy"""
     strategy_type: Literal[StrategyType.MULTIPLE]
-    webhook_id: str = Field(..., description="Webhook token")
+    webhook_id: Optional[str] = Field(None, description="Webhook token (for webhook-based strategies)")
+    strategy_code_id: Optional[int] = Field(None, description="Strategy code ID (for engine-based strategies)")
     ticker: str = Field(..., min_length=1, max_length=10)
     leader_account_id: str = Field(..., description="Leader account identifier")
     leader_quantity: int = Field(..., gt=0)
     follower_account_ids: List[str] = Field(..., min_items=1)
     follower_quantities: List[int] = Field(..., min_items=1)
     group_name: str = Field(..., min_length=1, max_length=100)
+
+    @validator('strategy_code_id')
+    def validate_strategy_source(cls, v, values):
+        webhook_id = values.get('webhook_id')
+        if not webhook_id and not v:
+            raise ValueError('Either webhook_id or strategy_code_id must be provided')
+        if webhook_id and v:
+            raise ValueError('Only one of webhook_id or strategy_code_id can be provided')
+        return v
 
     @validator('ticker')
     def validate_ticker(cls, v):
@@ -380,4 +405,135 @@ class StrategyInDB(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat(),
             Decimal: lambda v: str(v)
+        }
+
+
+# Strategy Engine Schemas
+
+class EngineStrategyCreate(BaseModel):
+    """Schema for creating a Strategy Engine strategy configuration"""
+    strategy_code_id: int = Field(..., description="ID of the strategy code to activate")
+    strategy_type: StrategyType = Field(..., description="Single or multiple account strategy")
+    ticker: str = Field(..., min_length=1, max_length=10, description="Trading symbol (e.g., ES, MES)")
+    
+    # Single strategy fields
+    account_id: Optional[str] = Field(None, description="Broker account ID for single strategy")
+    quantity: Optional[int] = Field(None, gt=0, description="Trade quantity for single strategy")
+    
+    # Multiple strategy fields  
+    leader_account_id: Optional[str] = Field(None, description="Leader account ID for multiple strategy")
+    leader_quantity: Optional[int] = Field(None, gt=0, description="Leader quantity")
+    follower_accounts: Optional[List[Dict[str, Union[str, int]]]] = Field(None, description="Follower accounts with quantities")
+    group_name: Optional[str] = Field(None, max_length=100, description="Group name for multiple strategy")
+    
+    # Risk management
+    max_position_size: Optional[int] = Field(None, gt=0, description="Maximum position size")
+    stop_loss_percent: Optional[float] = Field(None, gt=0, le=100, description="Stop loss percentage")
+    take_profit_percent: Optional[float] = Field(None, gt=0, le=100, description="Take profit percentage")
+    max_daily_loss: Optional[float] = Field(None, gt=0, description="Maximum daily loss limit")
+    
+    # Strategy Engine specific settings
+    enable_paper_trading: Optional[bool] = Field(False, description="Enable paper trading mode")
+    enable_live_trading: Optional[bool] = Field(True, description="Enable live trading")
+    max_signals_per_day: Optional[int] = Field(None, gt=0, description="Maximum signals per day")
+    
+    @validator('follower_accounts')
+    def validate_follower_accounts(cls, v, values):
+        if v is not None:
+            required_fields = {'account_id', 'quantity'}
+            for account in v:
+                if not isinstance(account, dict) or not required_fields.issubset(account.keys()):
+                    raise ValueError('Each follower account must have account_id and quantity')
+                if not isinstance(account['quantity'], int) or account['quantity'] <= 0:
+                    raise ValueError('Quantity must be a positive integer')
+        return v
+    
+    @validator('ticker')
+    def validate_ticker_format(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Ticker cannot be empty')
+        return v.strip().upper()
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "strategy_code_id": 1,
+                "strategy_type": "single",
+                "ticker": "MES",
+                "account_id": "123456789",
+                "quantity": 1,
+                "stop_loss_percent": 2.0,
+                "take_profit_percent": 3.0,
+                "enable_paper_trading": False,
+                "enable_live_trading": True
+            }
+        }
+
+
+class EngineStrategyResponse(BaseModel):
+    """Schema for Strategy Engine strategy response"""
+    id: int
+    strategy_type: StrategyType
+    execution_type: ExecutionType
+    strategy_code_id: int
+    ticker: str
+    is_active: bool
+    created_at: datetime
+    last_triggered: Optional[datetime]
+    
+    # Strategy code details
+    strategy_code: Optional[Dict[str, Any]] = Field(None, description="Strategy code details")
+    
+    # Account configuration
+    account_id: Optional[str] = None
+    quantity: Optional[int] = None
+    leader_account_id: Optional[str] = None
+    leader_quantity: Optional[int] = None
+    group_name: Optional[str] = None
+    
+    # Risk management
+    max_position_size: Optional[int] = None
+    stop_loss_percent: Optional[float] = None
+    take_profit_percent: Optional[float] = None
+    max_daily_loss: Optional[float] = None
+    
+    # Engine settings
+    engine_settings: Optional[Dict[str, Any]] = None
+    
+    # Performance stats
+    stats: Optional[StrategyStats] = None
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat(),
+            Decimal: lambda v: str(v)
+        }
+
+
+class EngineStrategyUpdate(BaseModel):
+    """Schema for updating a Strategy Engine strategy"""
+    is_active: Optional[bool] = None
+    quantity: Optional[int] = Field(None, gt=0)
+    leader_quantity: Optional[int] = Field(None, gt=0)
+    
+    # Risk management updates
+    stop_loss_percent: Optional[float] = Field(None, gt=0, le=100)
+    take_profit_percent: Optional[float] = Field(None, gt=0, le=100)
+    max_daily_loss: Optional[float] = Field(None, gt=0)
+    
+    # Engine settings updates
+    enable_paper_trading: Optional[bool] = None
+    enable_live_trading: Optional[bool] = None
+    max_signals_per_day: Optional[int] = Field(None, gt=0)
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "is_active": True,
+                "quantity": 2,
+                "stop_loss_percent": 1.5,
+                "take_profit_percent": 4.0,
+                "enable_live_trading": True
+            }
         }

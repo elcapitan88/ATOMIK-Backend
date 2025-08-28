@@ -20,7 +20,7 @@ def upgrade():
     # Create strategy_metrics table
     op.create_table('strategy_metrics',
         sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('strategy_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('strategy_id', sa.Integer(), nullable=False),
         sa.Column('date', sa.Date(), nullable=False),
         sa.Column('views', sa.Integer(), server_default='0'),
         sa.Column('unique_viewers', sa.Integer(), server_default='0'),
