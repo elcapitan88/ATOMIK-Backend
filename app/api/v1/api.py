@@ -15,8 +15,8 @@ try:
     logger.info("Admin endpoint imported successfully")
     
     # Import working endpoints (excluding interactivebrokers which breaks)
-    from .endpoints import creators, chat, feature_flags, marketplace, aria
-    logger.info("Working endpoints imported successfully (including ARIA)")
+    from .endpoints import creators, chat, feature_flags, marketplace, aria, affiliate
+    logger.info("Working endpoints imported successfully (including ARIA and affiliate)")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -93,6 +93,13 @@ try:
     logger.info("ARIA Assistant router registered")
 except Exception as e:
     logger.error(f"Error registering ARIA router: {e}")
+
+# Affiliate router
+try:
+    api_router.include_router(affiliate.router, prefix="/affiliate", tags=["affiliate"])
+    logger.info("Affiliate router registered")
+except Exception as e:
+    logger.error(f"Error registering affiliate router: {e}")
 
 # Interactive Brokers router - Re-enabled after dependency fixes (July 27, 2025)
 try:
