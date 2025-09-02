@@ -62,31 +62,68 @@ async def execute_strategy_signal(
     try:
         logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} {signal.symbol} x{signal.quantity}")
         
-        # Find active Engine strategy configurations for this signal
-        # Step 1: Find the strategy code by name
+        # Find active strategy configurations for this signal
+        # We support two patterns:
+        # 1. New pattern: StrategyCode-based (for database-stored strategies)
+        # 2. Direct pattern: Strategy name matching (for Strategy Engine file-based strategies)
+        
+        engine_strategies = []
+        
+        # First, try to find strategies via StrategyCode (new pattern)
         strategy_code = db.query(StrategyCode).filter(
             StrategyCode.name == signal.strategy_name,
             StrategyCode.is_active == True
         ).first()
         
-        if not strategy_code:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No active strategy code found with name '{signal.strategy_name}'"
-            )
+        if strategy_code:
+            # Found a StrategyCode, use it to find activated strategies
+            logger.info(f"Found StrategyCode record for '{signal.strategy_name}'")
+            engine_strategies = db.query(ActivatedStrategy).filter(
+                ActivatedStrategy.strategy_code_id == strategy_code.id,
+                ActivatedStrategy.execution_type == 'engine',
+                ActivatedStrategy.ticker == signal.symbol,
+                ActivatedStrategy.is_active == True
+            ).all()
         
-        # Step 2: Find activated Engine strategies using this strategy code and symbol
-        engine_strategies = db.query(ActivatedStrategy).filter(
-            ActivatedStrategy.strategy_code_id == strategy_code.id,
-            ActivatedStrategy.execution_type == 'engine',
-            ActivatedStrategy.ticker == signal.symbol,
-            ActivatedStrategy.is_active == True
-        ).all()
+        # If no strategies found via StrategyCode, try direct name matching
+        if not engine_strategies:
+            logger.info(f"No StrategyCode found, trying direct name matching for '{signal.strategy_name}'")
+            
+            # Look for activated strategies that match by name/type and symbol
+            # This supports Strategy Engine file-based strategies without database records
+            from sqlalchemy import or_, func
+            
+            engine_strategies = db.query(ActivatedStrategy).filter(
+                or_(
+                    # Match by strategy_type (case-insensitive)
+                    func.lower(ActivatedStrategy.strategy_type) == signal.strategy_name.lower().replace('_', ' '),
+                    func.lower(ActivatedStrategy.strategy_type) == signal.strategy_name.lower(),
+                    # Match by nickname
+                    func.lower(ActivatedStrategy.nickname) == signal.strategy_name.lower(),
+                    # For webhook-based strategies that are being transitioned
+                    ActivatedStrategy.webhook_id.in_(
+                        db.query(Webhook.token).filter(
+                            func.lower(Webhook.name).contains(signal.strategy_name.lower().replace('_', ' '))
+                        )
+                    )
+                ),
+                ActivatedStrategy.ticker == signal.symbol,
+                ActivatedStrategy.is_active == True
+            ).all()
+            
+            # If we found strategies via direct matching, mark them as engine execution
+            for strategy in engine_strategies:
+                if strategy.execution_type != 'engine':
+                    logger.info(f"Converting strategy {strategy.id} from {strategy.execution_type} to engine execution")
+                    strategy.execution_type = 'engine'
+                    db.commit()
         
         if not engine_strategies:
+            # Provide helpful error message
             raise HTTPException(
                 status_code=404,
-                detail=f"No active Engine strategies found for '{signal.strategy_name}' on symbol '{signal.symbol}'"
+                detail=f"No active strategies found for '{signal.strategy_name}' on symbol '{signal.symbol}'. "
+                       f"Please ensure you have activated this strategy in your account for {signal.symbol}."
             )
         
         logger.info(f"Found {len(engine_strategies)} active Engine strategies for {signal.strategy_name} on {signal.symbol}")
