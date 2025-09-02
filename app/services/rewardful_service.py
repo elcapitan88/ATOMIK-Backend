@@ -73,10 +73,20 @@ class RewardfulService:
             referral_code = self._generate_unique_referral_code(user, db)
             
             # Create affiliate in Rewardful
+            # Handle name parsing with fallbacks for required last_name
+            if user.full_name and len(user.full_name.strip().split()) > 1:
+                name_parts = user.full_name.strip().split()
+                first_name = name_parts[0]
+                last_name = " ".join(name_parts[1:])
+            else:
+                # If no full name or only one name, use username/email and add a default last name
+                first_name = user.full_name.strip() if user.full_name else user.username
+                last_name = "User"  # Default last name since Rewardful requires it
+            
             rewardful_affiliate_data = {
                 "email": user.email,
-                "first_name": user.full_name.split()[0] if user.full_name else user.username,
-                "last_name": " ".join(user.full_name.split()[1:]) if user.full_name and len(user.full_name.split()) > 1 else "",
+                "first_name": first_name,
+                "last_name": last_name,
                 "referral_code": referral_code
             }
             
