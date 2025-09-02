@@ -21,10 +21,7 @@ logger = logging.getLogger(__name__)
 class StrategySignalRequest(BaseModel):
     """Request model for strategy signals from Strategy Engine."""
     action: str = Field(..., description="BUY or SELL")
-    symbol: str = Field(..., description="Trading symbol (e.g., MES, ES)")
     strategy_name: str = Field(..., description="Name of the strategy")
-    quantity: int = Field(..., description="Number of contracts")
-    price: float = Field(..., description="Signal price")
     timestamp: str = Field(..., description="ISO timestamp")
     comment: Optional[str] = Field(None, description="EXIT_50, EXIT_FINAL, etc.")
 
@@ -60,7 +57,7 @@ async def execute_strategy_signal(
     4. Returns execution status
     """
     try:
-        logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} {signal.symbol} x{signal.quantity}")
+        logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} (minimal payload)")
         
         # Find active strategy configurations for this signal
         # We support two patterns:
@@ -81,7 +78,6 @@ async def execute_strategy_signal(
             engine_strategies = db.query(ActivatedStrategy).filter(
                 ActivatedStrategy.strategy_code_id == strategy_code.id,
                 ActivatedStrategy.execution_type == 'engine',
-                ActivatedStrategy.ticker == signal.symbol,
                 ActivatedStrategy.is_active == True
             ).all()
         
@@ -89,7 +85,7 @@ async def execute_strategy_signal(
         if not engine_strategies:
             logger.info(f"No StrategyCode found, trying direct name matching for '{signal.strategy_name}'")
             
-            # Look for activated strategies that match by name/type and symbol
+            # Look for activated strategies that match by name/type
             # This supports Strategy Engine file-based strategies without database records
             from sqlalchemy import or_, func
             
@@ -109,7 +105,6 @@ async def execute_strategy_signal(
                         )
                     )
                 ),
-                ActivatedStrategy.ticker == signal.symbol,
                 ActivatedStrategy.is_active == True
             ).all()
             
@@ -124,11 +119,11 @@ async def execute_strategy_signal(
             # Provide helpful error message
             raise HTTPException(
                 status_code=404,
-                detail=f"No active strategies found for '{signal.strategy_name}' on symbol '{signal.symbol}'. "
-                       f"Please ensure you have activated this strategy in your account for {signal.symbol}."
+                detail=f"No active strategies found for '{signal.strategy_name}'. "
+                       f"Please ensure you have activated this strategy in your account."
             )
         
-        logger.info(f"Found {len(engine_strategies)} active Engine strategies for {signal.strategy_name} on {signal.symbol}")
+        logger.info(f"Found {len(engine_strategies)} active Engine strategies for {signal.strategy_name}")
         
         execution_results = []
         
@@ -138,15 +133,14 @@ async def execute_strategy_signal(
                 logger.info(f"Executing on strategy {strategy.id} for user {strategy.user_id}, account {strategy.account_id}, quantity {strategy.quantity}")
         
                 # Convert signal to webhook payload format for StrategyProcessor
-                # Use the strategy's configured quantity, not the signal quantity
+                # Use the strategy's configured symbol and quantity from ActivatedStrategy
                 signal_data = {
                     "action": signal.action.upper(),
                     "comment": signal.comment or "",
                     "timestamp": signal.timestamp,
                     "source": "strategy_engine",
                     "strategy_name": signal.strategy_name,
-                    "price": signal.price,
-                    "ticker": signal.symbol
+                    "ticker": strategy.ticker  # Use symbol from ActivatedStrategy
                 }
                 
                 # Execute through the existing StrategyProcessor
