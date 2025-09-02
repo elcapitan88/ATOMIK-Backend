@@ -34,69 +34,6 @@ marketplace_service = MarketplaceService()
 stripe_connect_service = StripeConnectService()
 
 
-@router.get("/strategies")
-async def list_marketplace_strategies(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """
-    List all available strategies in the marketplace (both webhook-based and engine-based)
-    """
-    try:
-        # Get shared webhook strategies
-        webhook_strategies = (
-            db.query(Webhook)
-            .join(User)
-            .filter(Webhook.is_shared == True)
-            .all()
-        )
-
-        # Format webhook strategies for marketplace
-        strategies = []
-        for webhook in webhook_strategies:
-            strategy_data = {
-                "id": webhook.id,
-                "token": webhook.token,
-                "name": webhook.name,
-                "description": webhook.details.get('description', '') if webhook.details else '',
-                "creator": webhook.user.username,
-                "creator_id": webhook.user_id,
-                "type": "webhook",
-                "is_shared": webhook.is_shared,
-                "is_monetized": webhook.is_monetized or False,
-                "usage_intent": webhook.usage_intent or 'personal',
-                "created_at": webhook.created_at,
-                "last_triggered": webhook.last_triggered,
-                "webhook_url": f"{settings.SERVER_HOST.rstrip('/')}/api/v1/webhooks/{webhook.token}"
-            }
-            strategies.append(strategy_data)
-
-        # TODO: Add strategy engine strategies here when StrategyCode model is available
-        # engine_strategies = db.query(StrategyCode).filter(StrategyCode.is_public == True).all()
-        # for engine_strategy in engine_strategies:
-        #     strategy_data = {
-        #         "id": engine_strategy.id,
-        #         "token": f"engine_{engine_strategy.id}",
-        #         "name": engine_strategy.name,
-        #         "description": engine_strategy.description,
-        #         "creator": engine_strategy.user.username,
-        #         "creator_id": engine_strategy.user_id,
-        #         "type": "engine",
-        #         "is_shared": True,
-        #         "is_monetized": engine_strategy.is_monetized or False,
-        #         "created_at": engine_strategy.created_at
-        #     }
-        #     strategies.append(strategy_data)
-
-        return {"strategies": strategies}
-
-    except Exception as e:
-        logger.error(f"Error listing marketplace strategies: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list marketplace strategies: {str(e)}"
-        )
-
 
 def convert_pricing_options_to_strategy_pricing(pricing_options: List[dict], webhook_id: int) -> StrategyPricingCreate:
     """
