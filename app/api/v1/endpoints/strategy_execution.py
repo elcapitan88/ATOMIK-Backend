@@ -24,6 +24,10 @@ class StrategySignalRequest(BaseModel):
     strategy_name: str = Field(..., description="Name of the strategy")
     timestamp: str = Field(..., description="ISO timestamp")
     comment: Optional[str] = Field(None, description="EXIT_50, EXIT_FINAL, etc.")
+    # Legacy fields for backward compatibility - will be ignored
+    symbol: Optional[str] = Field(None, description="DEPRECATED: Use ActivatedStrategy.ticker instead")
+    quantity: Optional[int] = Field(None, description="DEPRECATED: Use ActivatedStrategy.quantity instead")
+    price: Optional[float] = Field(None, description="DEPRECATED: Signal price not used")
 
 
 def verify_strategy_engine_api_key(x_api_key: str = Header(None, alias="X-API-Key")) -> bool:
