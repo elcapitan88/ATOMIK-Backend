@@ -157,6 +157,7 @@ async def execute_strategy_signal(
                     "strategy_id": strategy.id,
                     "user_id": strategy.user_id,
                     "account_id": strategy.account_id,
+                    "ticker": strategy.ticker,  # Add ticker for response
                     "configured_quantity": strategy.quantity,
                     "success": result.get("status") == "success",
                     "result": result
@@ -193,10 +194,13 @@ async def execute_strategy_signal(
         successful_executions = [r for r in execution_results if r.get("success")]
         failed_executions = [r for r in execution_results if not r.get("success")]
         
+        # Get symbol from first executed strategy (they should all be the same)
+        executed_symbol = execution_results[0]["ticker"] if execution_results else "Unknown"
+        
         return {
             "signal_processed": True,
             "strategy_name": signal.strategy_name,
-            "symbol": signal.symbol,
+            "symbol": executed_symbol,  # Use symbol from ActivatedStrategy
             "action": signal.action,
             "total_strategies": len(execution_results),
             "successful_executions": len(successful_executions),
