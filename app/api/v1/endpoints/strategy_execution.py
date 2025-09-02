@@ -98,12 +98,14 @@ async def execute_strategy_signal(
                     # Match by strategy_type (case-insensitive)
                     func.lower(ActivatedStrategy.strategy_type) == signal.strategy_name.lower().replace('_', ' '),
                     func.lower(ActivatedStrategy.strategy_type) == signal.strategy_name.lower(),
-                    # Match by nickname
-                    func.lower(ActivatedStrategy.nickname) == signal.strategy_name.lower(),
                     # For webhook-based strategies that are being transitioned
+                    # Match if the webhook name contains the strategy name
                     ActivatedStrategy.webhook_id.in_(
                         db.query(Webhook.token).filter(
-                            func.lower(Webhook.name).contains(signal.strategy_name.lower().replace('_', ' '))
+                            or_(
+                                func.lower(Webhook.name).contains(signal.strategy_name.lower().replace('_', ' ')),
+                                func.lower(Webhook.name).contains(signal.strategy_name.lower())
+                            )
                         )
                     )
                 ),
