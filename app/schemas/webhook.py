@@ -23,6 +23,7 @@ class WebhookSourceType(str, Enum):
     TRADINGVIEW = "tradingview"
     TRENDSPIDER = "trendspider"
     CUSTOM = "custom"
+    STRATEGY_ENGINE = "strategy_engine"
 
 class StrategyType(str, Enum):
     MOMENTUM = "momentum"
