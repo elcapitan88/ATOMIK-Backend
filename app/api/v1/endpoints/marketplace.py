@@ -9,7 +9,9 @@ from app.core.security import get_current_user
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
-from app.models.webhook import Webhook
+from app.models.webhook import Webhook, WebhookSubscription
+from app.models.strategy_code import StrategyCode
+from app.models.strategy import ActivatedStrategy
 from app.models.strategy_pricing import StrategyPricing
 from app.models.strategy_purchase import StrategyPurchase, PurchaseStatus, PurchaseType
 from app.models.creator_profile import CreatorProfile
@@ -33,6 +35,170 @@ router = APIRouter()
 marketplace_service = MarketplaceService()
 stripe_connect_service = StripeConnectService()
 
+
+@router.get("/strategies/available")
+async def get_available_strategies(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(deps.get_current_user_optional)
+):
+    """
+    Get all available strategies for marketplace - combines webhook and strategy engine strategies.
+    Returns unified list showing what users can subscribe to or activate.
+    """
+    try:
+        available_strategies = []
+        
+        # 1. Get Webhook Strategies (from webhooks table)
+        webhook_strategies = db.query(Webhook).filter(
+            Webhook.is_active == True,
+            Webhook.is_shared == True  # Only shared strategies appear in marketplace
+        ).all()
+        
+        for webhook in webhook_strategies:
+            # Check user's access to this webhook strategy
+            user_has_access = False
+            access_method = "none"
+            
+            if current_user:
+                # Check if user owns the strategy
+                if webhook.user_id == current_user.id:
+                    user_has_access = True
+                    access_method = "owner"
+                else:
+                    # Check free subscription
+                    free_sub = db.query(WebhookSubscription).filter(
+                        WebhookSubscription.webhook_id == webhook.id,
+                        WebhookSubscription.user_id == current_user.id
+                    ).first()
+                    
+                    if free_sub:
+                        user_has_access = True
+                        access_method = "free_subscription"
+                    else:
+                        # Check paid purchase
+                        paid_purchase = db.query(StrategyPurchase).filter(
+                            StrategyPurchase.webhook_id == webhook.id,
+                            StrategyPurchase.user_id == current_user.id,
+                            StrategyPurchase.status == "COMPLETED"
+                        ).first()
+                        
+                        if paid_purchase:
+                            user_has_access = True
+                            access_method = "paid_purchase"
+            
+            # Determine if this is free or paid based on usage_intent
+            is_free_strategy = webhook.usage_intent == "share_free"
+            pricing_type = "free" if is_free_strategy else "paid"
+            
+            strategy_data = {
+                "id": f"webhook_{webhook.id}",
+                "strategy_type": "webhook",
+                "source_id": webhook.token,  # Use token for webhook strategies
+                "name": webhook.name,
+                "display_name": webhook.name,
+                "description": webhook.details or f"{webhook.name} trading strategy",
+                "creator_id": webhook.user_id,
+                "category": "TradingView Webhook",
+                "subscriber_count": webhook.subscriber_count or 0,
+                "rating": webhook.rating or 0.0,
+                "is_active": webhook.is_active,
+                "pricing_type": pricing_type,
+                "user_has_access": user_has_access,
+                "access_method": access_method,
+                "source_type": webhook.source_type,
+                "created_at": webhook.created_at.isoformat() if webhook.created_at else None,
+                "last_triggered": webhook.last_triggered.isoformat() if webhook.last_triggered else None
+            }
+            
+            available_strategies.append(strategy_data)
+        
+        # 2. Get Strategy Engine Strategies (from strategy_codes table)
+        engine_strategies = db.query(StrategyCode).filter(
+            StrategyCode.is_active == True,
+            StrategyCode.is_validated == True,
+            StrategyCode.user_id == 39  # System/public strategies (adjust as needed)
+        ).all()
+        
+        for strategy_code in engine_strategies:
+            # Check user's access to this engine strategy
+            user_has_access = False
+            access_method = "none"
+            active_activation_count = 0
+            
+            if current_user:
+                # Check if user owns the strategy
+                if strategy_code.user_id == current_user.id:
+                    user_has_access = True
+                    access_method = "owner"
+                else:
+                    # Check if user has activated this strategy
+                    user_activation = db.query(ActivatedStrategy).filter(
+                        ActivatedStrategy.strategy_code_id == strategy_code.id,
+                        ActivatedStrategy.user_id == current_user.id,
+                        ActivatedStrategy.is_active == True
+                    ).first()
+                    
+                    if user_activation:
+                        user_has_access = True
+                        access_method = "activation"
+                
+                # Count user's active activations for this strategy
+                active_activation_count = db.query(ActivatedStrategy).filter(
+                    ActivatedStrategy.strategy_code_id == strategy_code.id,
+                    ActivatedStrategy.user_id == current_user.id,
+                    ActivatedStrategy.is_active == True
+                ).count()
+            
+            strategy_data = {
+                "id": f"engine_{strategy_code.id}",
+                "strategy_type": "engine", 
+                "source_id": strategy_code.id,  # Use integer ID for strategy engine
+                "name": strategy_code.name,
+                "display_name": strategy_code.name.replace("_", " ").title(),
+                "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
+                "creator_id": strategy_code.user_id,
+                "category": "Strategy Engine",
+                "subscriber_count": 0,  # Engine strategies don't have subscribers, they have activations
+                "rating": 0.0,  # Could add ratings later
+                "is_active": strategy_code.is_active,
+                "pricing_type": "free",  # Engine strategies are currently free to activate
+                "user_has_access": user_has_access,
+                "access_method": access_method,
+                "source_type": "algorithm",
+                "symbols": strategy_code.symbols_list if hasattr(strategy_code, 'symbols_list') else [],
+                "is_validated": strategy_code.is_validated,
+                "signals_generated": strategy_code.signals_generated if hasattr(strategy_code, 'signals_generated') else 0,
+                "user_activations": active_activation_count,
+                "created_at": strategy_code.created_at.isoformat() if strategy_code.created_at else None,
+                "last_signal_at": strategy_code.last_signal_at.isoformat() if hasattr(strategy_code, 'last_signal_at') and strategy_code.last_signal_at else None
+            }
+            
+            available_strategies.append(strategy_data)
+        
+        # Sort strategies by subscriber count + user activations (popularity)
+        available_strategies.sort(
+            key=lambda x: (x["subscriber_count"] + x.get("user_activations", 0)), 
+            reverse=True
+        )
+        
+        logger.info(f"Returning {len(available_strategies)} available strategies ({len(webhook_strategies)} webhook + {len(engine_strategies)} engine)")
+        
+        return {
+            "strategies": available_strategies,
+            "total": len(available_strategies),
+            "webhook_count": len(webhook_strategies), 
+            "engine_count": len(engine_strategies),
+            "user_authenticated": current_user is not None
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting available strategies: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch available strategies: {str(e)}"
+        )
 
 
 def convert_pricing_options_to_strategy_pricing(pricing_options: List[dict], webhook_id: int) -> StrategyPricingCreate:
