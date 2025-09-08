@@ -157,7 +157,7 @@ async def get_available_strategies(
                 "display_name": strategy_code.name.replace("_", " ").title(),
                 "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
                 "creator_id": strategy_code.user_id,
-                "category": "Strategy Engine",
+                "category": "breakout" if strategy_code.name == "stddev_breakout" else "Strategy Engine",
                 "subscriber_count": 0,  # Engine strategies don't have subscribers, they have activations
                 "rating": 0.0,  # Could add ratings later
                 "is_active": strategy_code.is_active,
