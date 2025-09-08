@@ -36,6 +36,25 @@ marketplace_service = MarketplaceService()
 stripe_connect_service = StripeConnectService()
 
 
+def _categorize_engine_strategy(name: str, description: str = None) -> str:
+    """Categorize engine strategy based on name and description."""
+    name_lower = name.lower()
+    desc_lower = (description or '').lower()
+    
+    if 'breakout' in name_lower or 'breakout' in desc_lower:
+        return 'breakout'
+    elif 'momentum' in name_lower or 'momentum' in desc_lower:
+        return 'momentum'
+    elif 'mean' in name_lower or 'reversion' in name_lower or 'reversion' in desc_lower:
+        return 'mean_reversion'
+    elif 'scalp' in name_lower or 'scalp' in desc_lower:
+        return 'scalping'
+    elif 'arbitrage' in name_lower or 'arbitrage' in desc_lower:
+        return 'arbitrage'
+    else:
+        return 'uncategorized'
+
+
 @router.get("/strategies/available")
 async def get_available_strategies(
     db: Session = Depends(get_db),
@@ -98,7 +117,7 @@ async def get_available_strategies(
                 "display_name": webhook.name,
                 "description": webhook.details or f"{webhook.name} trading strategy",
                 "creator_id": webhook.user_id,
-                "category": "TradingView Webhook",
+                "category": webhook.strategy_type.lower() if webhook.strategy_type else "uncategorized",
                 "subscriber_count": webhook.subscriber_count or 0,
                 "rating": webhook.rating or 0.0,
                 "is_active": webhook.is_active,
@@ -157,7 +176,7 @@ async def get_available_strategies(
                 "display_name": strategy_code.name.replace("_", " ").title(),
                 "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
                 "creator_id": strategy_code.user_id,
-                "category": "breakout" if strategy_code.name == "stddev_breakout" else "Strategy Engine",
+                "category": _categorize_engine_strategy(strategy_code.name, strategy_code.description),
                 "subscriber_count": 0,  # Engine strategies don't have subscribers, they have activations
                 "rating": 0.0,  # Could add ratings later
                 "is_active": strategy_code.is_active,
