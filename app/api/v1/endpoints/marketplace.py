@@ -74,6 +74,10 @@ async def get_available_strategies(
         ).all()
         
         for webhook in webhook_strategies:
+            # Get creator's username
+            creator = db.query(User).filter(User.id == webhook.user_id).first()
+            creator_username = creator.username if creator else "Unknown"
+            
             # Check user's access to this webhook strategy
             user_has_access = False
             access_method = "none"
@@ -117,6 +121,7 @@ async def get_available_strategies(
                 "display_name": webhook.name,
                 "description": webhook.details or f"{webhook.name} trading strategy",
                 "creator_id": webhook.user_id,
+                "username": creator_username,  # Add creator's username
                 "category": webhook.strategy_type.lower() if webhook.strategy_type else "uncategorized",
                 "subscriber_count": webhook.subscriber_count or 0,
                 "rating": webhook.rating or 0.0,
@@ -139,6 +144,10 @@ async def get_available_strategies(
         ).all()
         
         for strategy_code in engine_strategies:
+            # Get creator's username
+            creator = db.query(User).filter(User.id == strategy_code.user_id).first()
+            creator_username = creator.username if creator else "Unknown"
+            
             # Check user's access to this engine strategy
             user_has_access = False
             access_method = "none"
@@ -176,6 +185,7 @@ async def get_available_strategies(
                 "display_name": strategy_code.name.replace("_", " ").title(),
                 "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
                 "creator_id": strategy_code.user_id,
+                "username": creator_username,  # Add creator's username
                 "category": _categorize_engine_strategy(strategy_code.name, strategy_code.description),
                 "subscriber_count": 0,  # Engine strategies don't have subscribers, they have activations
                 "rating": 0.0,  # Could add ratings later
