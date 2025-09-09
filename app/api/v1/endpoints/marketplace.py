@@ -159,16 +159,17 @@ async def get_available_strategies(
                     user_has_access = True
                     access_method = "owner"
                 else:
-                    # Check if user has activated this strategy
-                    user_activation = db.query(ActivatedStrategy).filter(
-                        ActivatedStrategy.strategy_code_id == strategy_code.id,
-                        ActivatedStrategy.user_id == current_user.id,
-                        ActivatedStrategy.is_active == True
+                    # Check if user is subscribed to this engine strategy
+                    from app.models.webhook import WebhookSubscription
+                    subscription = db.query(WebhookSubscription).filter(
+                        WebhookSubscription.user_id == current_user.id,
+                        WebhookSubscription.strategy_type == 'engine',
+                        WebhookSubscription.strategy_code_id == strategy_code.id
                     ).first()
                     
-                    if user_activation:
+                    if subscription:
                         user_has_access = True
-                        access_method = "activation"
+                        access_method = "subscription"
                 
                 # Count user's active activations for this strategy
                 active_activation_count = db.query(ActivatedStrategy).filter(
