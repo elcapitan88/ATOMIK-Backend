@@ -242,18 +242,25 @@ class WebhookLog(Base):
 
 class WebhookSubscription(Base):
     """
-    Model for tracking webhook subscriptions.
+    Model for tracking webhook and engine strategy subscriptions.
+    Extended to support both webhook and engine strategies in a unified table.
     """
     __tablename__ = "webhook_subscriptions"
 
     id = Column(Integer, primary_key=True)
-    webhook_id = Column(Integer, ForeignKey("webhooks.id", ondelete="CASCADE"))
+    webhook_id = Column(Integer, ForeignKey("webhooks.id", ondelete="CASCADE"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     subscribed_at = Column(DateTime, default=datetime.utcnow)
+    
+    # New fields for unified subscription system
+    strategy_type = Column(String(20), default='webhook', nullable=False)  # 'webhook' or 'engine'
+    strategy_id = Column(String(50), nullable=True)  # Generic string identifier
+    strategy_code_id = Column(Integer, ForeignKey("strategy_codes.id", ondelete="CASCADE"), nullable=True)
 
     # Relationships
     webhook = relationship("Webhook", back_populates="subscribers")
     user = relationship("User", backref="webhook_subscriptions")
+    strategy_code = relationship("StrategyCode", backref="subscriptions")
 
     __table_args__ = (
         sqlalchemy.UniqueConstraint('webhook_id', 'user_id', name='uq_webhook_subscription'),
