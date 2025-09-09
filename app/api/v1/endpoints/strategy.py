@@ -138,15 +138,32 @@ async def activate_strategy(
             from ...models.strategy_code import StrategyCode
             strategy_code = db.query(StrategyCode).filter(
                 StrategyCode.id == strategy.strategy_code_id,
-                StrategyCode.user_id == current_user.id,
-                StrategyCode.is_active == True
+                StrategyCode.is_active == True,
+                StrategyCode.is_validated == True
             ).first()
             
             if not strategy_code:
                 raise HTTPException(
                     status_code=404, 
-                    detail="Strategy code not found or not accessible"
+                    detail="Engine strategy not found or not available"
                 )
+            
+            # Check if user has access to this engine strategy
+            is_owner = strategy_code.user_id == current_user.id
+            
+            # Check engine strategy subscription access
+            is_subscriber = db.query(WebhookSubscription).filter(
+                WebhookSubscription.strategy_code_id == strategy.strategy_code_id,
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine'
+            ).first() is not None
+            
+            if not (is_owner or is_subscriber):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You don't have access to this engine strategy. Please subscribe first."
+                )
+            
             execution_type = 'engine'
 
         # Validate and convert ticker to display format
