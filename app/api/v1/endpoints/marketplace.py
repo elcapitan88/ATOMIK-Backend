@@ -137,10 +137,10 @@ async def get_available_strategies(
             available_strategies.append(strategy_data)
         
         # 2. Get Strategy Engine Strategies (from strategy_codes table)
+        # Show all active, validated engine strategies in marketplace
         engine_strategies = db.query(StrategyCode).filter(
             StrategyCode.is_active == True,
-            StrategyCode.is_validated == True,
-            StrategyCode.user_id == 39  # System/public strategies (adjust as needed)
+            StrategyCode.is_validated == True
         ).all()
         
         for strategy_code in engine_strategies:
@@ -177,13 +177,22 @@ async def get_available_strategies(
                     ActivatedStrategy.is_active == True
                 ).count()
             
+            # Create a more user-friendly display name
+            display_name = strategy_code.name.replace("_", " ").title()
+            if strategy_code.name == "stddev_breakout":
+                display_name = "Standard Deviation Breakout"
+            elif strategy_code.name == "momentum_scalper":
+                display_name = "Momentum Scalper"
+            elif strategy_code.name == "mean_reversion":
+                display_name = "Mean Reversion"
+            
             strategy_data = {
                 "id": f"engine_{strategy_code.id}",
                 "strategy_type": "engine", 
                 "source_id": strategy_code.id,  # Use integer ID for strategy engine
                 "name": strategy_code.name,
-                "display_name": strategy_code.name.replace("_", " ").title(),
-                "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
+                "display_name": display_name,
+                "description": strategy_code.description or f"{display_name} algorithmic trading strategy",
                 "creator_id": strategy_code.user_id,
                 "username": creator_username,  # Add creator's username
                 "category": _categorize_engine_strategy(strategy_code.name, strategy_code.description),
