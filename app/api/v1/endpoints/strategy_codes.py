@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 
 from ....db.session import get_db
 from ....core.config import settings
@@ -47,8 +47,16 @@ class StrategyCodeResponse(BaseModel):
     version: int
     created_at: str
     updated_at: str
-    signals_generated: int
-    error_count: int
+    signals_generated: Optional[int] = 0
+    error_count: Optional[int] = 0
+
+    @validator('signals_generated', pre=True)
+    def validate_signals_generated(cls, v):
+        return v if v is not None else 0
+    
+    @validator('error_count', pre=True)
+    def validate_error_count(cls, v):
+        return v if v is not None else 0
 
     class Config:
         from_attributes = True
