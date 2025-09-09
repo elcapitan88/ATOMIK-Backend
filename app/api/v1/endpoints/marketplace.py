@@ -160,7 +160,6 @@ async def get_available_strategies(
                     access_method = "owner"
                 else:
                     # Check if user is subscribed to this engine strategy
-                    from app.models.webhook import WebhookSubscription
                     subscription = db.query(WebhookSubscription).filter(
                         WebhookSubscription.user_id == current_user.id,
                         WebhookSubscription.strategy_type == 'engine',

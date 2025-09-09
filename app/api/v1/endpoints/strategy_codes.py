@@ -10,6 +10,7 @@ from ....core.config import settings
 from ....core.security import get_current_user
 from ....models.user import User
 from ....models.strategy_code import StrategyCode
+from ....models.webhook import WebhookSubscription
 from datetime import datetime
 
 router = APIRouter()
@@ -205,8 +206,6 @@ async def get_user_strategies(
 ):
     """Get all strategy codes accessible to the user (owned or subscribed)."""
     try:
-        from ....models.webhook import WebhookSubscription
-        
         # Get strategies the user owns
         owned_strategies = db.query(StrategyCode).filter(
             StrategyCode.user_id == current_user.id
