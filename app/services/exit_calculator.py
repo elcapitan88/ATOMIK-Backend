@@ -63,7 +63,7 @@ class ExitCalculator:
             # Handle BUY actions 
             if action == "BUY":
                 # BUY can be: 1) Long entry, 2) Short exit
-                if has_short_position and exit_type_upper and "EXIT" in exit_type_upper:
+                if has_short_position and exit_type_upper and ("EXIT" in exit_type_upper or "STOP" in exit_type_upper):
                     # This is a short exit - calculate based on short position size
                     position_size = abs(current_position)
                     logger.info(f"BUY exit from short position of {current_position}")
@@ -79,7 +79,7 @@ class ExitCalculator:
                         return 0, "Cannot BUY to exit long position - use SELL"
                     else:
                         # No position but trying to exit - this is an error
-                        if "EXIT" in exit_type_upper:
+                        if "EXIT" in exit_type_upper or "STOP" in exit_type_upper:
                             logger.warning(f"BUY exit attempted with no position")
                             return 0, "No position to exit"
                         else:
@@ -90,7 +90,7 @@ class ExitCalculator:
             # Handle SELL actions
             elif action == "SELL":
                 # SELL can be: 1) Short entry, 2) Long exit
-                if has_long_position and exit_type_upper and "EXIT" in exit_type_upper:
+                if has_long_position and exit_type_upper and ("EXIT" in exit_type_upper or "STOP" in exit_type_upper):
                     # This is a long exit - calculate based on long position size
                     position_size = current_position
                     logger.info(f"SELL exit from long position of {current_position}")
