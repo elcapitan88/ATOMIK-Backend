@@ -322,6 +322,27 @@ class StrategyProcessor:
                                operation="position_check",
                                extra_context={"symbol": contract_ticker, "position": current_position, "exit_type": exit_type})
                     
+                    # VALIDATION: Check trade direction before executing
+                    is_valid, validation_message = await self.position_service.validate_trade_direction(
+                        strategy.id,
+                        account.account_id,
+                        current_position,
+                        action,
+                        exit_type
+                    )
+                    
+                    if not is_valid:
+                        logger.warning(f"Trade direction validation failed: {validation_message}",
+                                     operation="trade_validation",
+                                     extra_context={
+                                         "strategy_id": strategy.id,
+                                         "symbol": contract_ticker,
+                                         "action": action,
+                                         "current_position": current_position,
+                                         "exit_type": exit_type
+                                     })
+                        # Continue with trade but log the validation issue for monitoring
+                    
                     # Calculate quantity using exit calculator
                     calculated_quantity, calculation_reason = await ExitCalculator.calculate_exit_quantity(
                         strategy,
