@@ -1040,7 +1040,6 @@ async def configure_engine_strategy(
         subscription = None
         if not is_owner:
             # Check if user has subscription to this strategy
-            from ...models.webhook_subscription import WebhookSubscription
             subscription = db.query(WebhookSubscription).filter(
                 WebhookSubscription.user_id == current_user.id,
                 WebhookSubscription.strategy_type == 'engine',
