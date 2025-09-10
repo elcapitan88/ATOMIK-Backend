@@ -26,7 +26,7 @@ class StrategyMonetization(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    webhook = relationship("Webhook", backref="monetization", uselist=False)
+    webhook = relationship("Webhook", back_populates="strategy_monetization", uselist=False)
     creator = relationship("User", foreign_keys=[creator_user_id])
     prices = relationship("StrategyPrice", back_populates="monetization", cascade="all, delete-orphan")
 
