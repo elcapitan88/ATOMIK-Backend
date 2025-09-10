@@ -1118,6 +1118,7 @@ async def configure_engine_strategy(
             user_id=current_user.id,
             strategy_type=strategy.strategy_type.value,
             execution_type='engine',  # Key difference from webhook strategies
+            webhook_id=None,  # Explicitly None for engine strategies
             strategy_code_id=strategy.strategy_code_id,
             ticker=display_ticker,
             
