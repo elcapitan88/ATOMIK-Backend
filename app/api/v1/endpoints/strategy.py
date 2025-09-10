@@ -1023,17 +1023,35 @@ async def configure_engine_strategy(
     try:
         logger.info(f"Configuring Engine strategy for user {current_user.id}")
         
-        # Validate strategy code exists and belongs to user
+        # Validate strategy code exists and user has access (owner or subscriber)
         strategy_code = db.query(StrategyCode).filter(
-            StrategyCode.id == strategy.strategy_code_id,
-            StrategyCode.user_id == current_user.id
+            StrategyCode.id == strategy.strategy_code_id
         ).first()
         
         if not strategy_code:
             raise HTTPException(
                 status_code=404,
-                detail="Strategy code not found or access denied"
+                detail="Strategy code not found"
             )
+        
+        # Check if user is owner OR subscriber
+        is_owner = strategy_code.user_id == current_user.id
+        
+        subscription = None
+        if not is_owner:
+            # Check if user has subscription to this strategy
+            from ...models.webhook_subscription import WebhookSubscription
+            subscription = db.query(WebhookSubscription).filter(
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine',
+                WebhookSubscription.strategy_code_id == strategy.strategy_code_id
+            ).first()
+            
+            if not subscription:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied - you must own or be subscribed to this strategy"
+                )
         
         if not strategy_code.is_validated:
             raise HTTPException(
