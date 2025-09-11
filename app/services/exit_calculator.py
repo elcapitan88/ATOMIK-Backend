@@ -139,8 +139,8 @@ class ExitCalculator:
                 logger.info(f"Calculating 75% exit: {position_size} * 0.75 = {quantity}")
                 return quantity, "75% partial exit"
             
-            # Final/All exits
-            if exit_type_upper in ["EXIT_FINAL", "EXIT_ALL", "EXIT_100"]:
+            # Final/All exits and Stop Losses
+            if exit_type_upper in ["EXIT_FINAL", "EXIT_ALL", "EXIT_100", "STOP_LOSS"]:
                 logger.info(f"Final exit: closing entire position of {position_size}")
                 return position_size, "Final exit - closing all remaining"
             
@@ -150,15 +150,15 @@ class ExitCalculator:
                 try:
                     percentage = int(percentage_match.group(1))
                     if 0 < percentage <= 100:
-                        quantity = math.ceil(current_position * (percentage / 100))
-                        logger.info(f"Custom {percentage}% exit: {current_position} * {percentage/100} = {quantity}")
+                        quantity = math.ceil(position_size * (percentage / 100))
+                        logger.info(f"Custom {percentage}% exit: {position_size} * {percentage/100} = {quantity}")
                         return quantity, f"Custom {percentage}% exit"
                     else:
                         logger.warning(f"Invalid percentage {percentage}, using full position")
-                        return current_position, f"Invalid percentage {percentage}, defaulting to full exit"
+                        return position_size, f"Invalid percentage {percentage}, defaulting to full exit"
                 except ValueError:
                     logger.error(f"Could not parse percentage from {exit_type_upper}")
-                    return current_position, "Parse error - defaulting to full exit"
+                    return position_size, "Parse error - defaulting to full exit"
             
             # Handle scale-out patterns (EXIT_1, EXIT_2, EXIT_3)
             scale_match = re.match(r"EXIT_(\d)$", exit_type_upper)
@@ -172,7 +172,7 @@ class ExitCalculator:
             
             # Default: exit full position for unrecognized exit types
             logger.warning(f"Unrecognized exit type '{exit_type_upper}', defaulting to full position exit")
-            return current_position, f"Unrecognized exit type - defaulting to full exit"
+            return position_size, f"Unrecognized exit type - defaulting to full exit"
     
     @staticmethod
     def _calculate_scaled_exit(
