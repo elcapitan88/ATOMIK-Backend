@@ -21,12 +21,13 @@ logger = logging.getLogger(__name__)
 class StrategySignalRequest(BaseModel):
     """Request model for strategy signals from Strategy Engine."""
     action: str = Field(..., description="BUY or SELL")
-    symbol: str = Field(..., description="Trading symbol (e.g., MES, ES)")
     strategy_name: str = Field(..., description="Name of the strategy")
-    quantity: int = Field(..., description="Number of contracts")
-    price: float = Field(..., description="Signal price")
     timestamp: str = Field(..., description="ISO timestamp")
     comment: Optional[str] = Field(None, description="EXIT_50, EXIT_FINAL, etc.")
+    # Legacy fields for backward compatibility - will be ignored
+    symbol: Optional[str] = Field(None, description="DEPRECATED: Use ActivatedStrategy.ticker instead")
+    quantity: Optional[int] = Field(None, description="DEPRECATED: Use ActivatedStrategy.quantity instead")
+    price: Optional[float] = Field(None, description="DEPRECATED: Signal price not used")
 
 
 def verify_strategy_engine_api_key(x_api_key: str = Header(None, alias="X-API-Key")) -> bool:
@@ -60,36 +61,73 @@ async def execute_strategy_signal(
     4. Returns execution status
     """
     try:
-        logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} {signal.symbol} x{signal.quantity}")
+        logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} (minimal payload)")
         
-        # Find active Engine strategy configurations for this signal
-        # Step 1: Find the strategy code by name
+        # Find active strategy configurations for this signal
+        # We support two patterns:
+        # 1. New pattern: StrategyCode-based (for database-stored strategies)
+        # 2. Direct pattern: Strategy name matching (for Strategy Engine file-based strategies)
+        
+        engine_strategies = []
+        
+        # First, try to find strategies via StrategyCode (new pattern)
         strategy_code = db.query(StrategyCode).filter(
             StrategyCode.name == signal.strategy_name,
             StrategyCode.is_active == True
         ).first()
         
-        if not strategy_code:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No active strategy code found with name '{signal.strategy_name}'"
-            )
+        if strategy_code:
+            # Found a StrategyCode, use it to find activated strategies
+            logger.info(f"Found StrategyCode record for '{signal.strategy_name}'")
+            engine_strategies = db.query(ActivatedStrategy).filter(
+                ActivatedStrategy.strategy_code_id == strategy_code.id,
+                ActivatedStrategy.execution_type == 'engine',
+                ActivatedStrategy.is_active == True
+            ).all()
         
-        # Step 2: Find activated Engine strategies using this strategy code and symbol
-        engine_strategies = db.query(ActivatedStrategy).filter(
-            ActivatedStrategy.strategy_code_id == strategy_code.id,
-            ActivatedStrategy.execution_type == 'engine',
-            ActivatedStrategy.ticker == signal.symbol,
-            ActivatedStrategy.is_active == True
-        ).all()
+        # If no strategies found via StrategyCode, try direct name matching
+        if not engine_strategies:
+            logger.info(f"No StrategyCode found, trying direct name matching for '{signal.strategy_name}'")
+            
+            # Look for activated strategies that match by name/type
+            # This supports Strategy Engine file-based strategies without database records
+            from sqlalchemy import or_, func
+            
+            engine_strategies = db.query(ActivatedStrategy).filter(
+                or_(
+                    # Match by strategy_type (case-insensitive)
+                    func.lower(ActivatedStrategy.strategy_type) == signal.strategy_name.lower().replace('_', ' '),
+                    func.lower(ActivatedStrategy.strategy_type) == signal.strategy_name.lower(),
+                    # For webhook-based strategies that are being transitioned
+                    # Match if the webhook name contains the strategy name
+                    ActivatedStrategy.webhook_id.in_(
+                        db.query(Webhook.token).filter(
+                            or_(
+                                func.lower(Webhook.name).contains(signal.strategy_name.lower().replace('_', ' ')),
+                                func.lower(Webhook.name).contains(signal.strategy_name.lower())
+                            )
+                        )
+                    )
+                ),
+                ActivatedStrategy.is_active == True
+            ).all()
+            
+            # If we found strategies via direct matching, mark them as engine execution
+            for strategy in engine_strategies:
+                if strategy.execution_type != 'engine':
+                    logger.info(f"Converting strategy {strategy.id} from {strategy.execution_type} to engine execution")
+                    strategy.execution_type = 'engine'
+                    db.commit()
         
         if not engine_strategies:
+            # Provide helpful error message
             raise HTTPException(
                 status_code=404,
-                detail=f"No active Engine strategies found for '{signal.strategy_name}' on symbol '{signal.symbol}'"
+                detail=f"No active strategies found for '{signal.strategy_name}'. "
+                       f"Please ensure you have activated this strategy in your account."
             )
         
-        logger.info(f"Found {len(engine_strategies)} active Engine strategies for {signal.strategy_name} on {signal.symbol}")
+        logger.info(f"Found {len(engine_strategies)} active Engine strategies for {signal.strategy_name}")
         
         execution_results = []
         
@@ -99,15 +137,14 @@ async def execute_strategy_signal(
                 logger.info(f"Executing on strategy {strategy.id} for user {strategy.user_id}, account {strategy.account_id}, quantity {strategy.quantity}")
         
                 # Convert signal to webhook payload format for StrategyProcessor
-                # Use the strategy's configured quantity, not the signal quantity
+                # Use the strategy's configured symbol and quantity from ActivatedStrategy
                 signal_data = {
                     "action": signal.action.upper(),
                     "comment": signal.comment or "",
                     "timestamp": signal.timestamp,
                     "source": "strategy_engine",
                     "strategy_name": signal.strategy_name,
-                    "price": signal.price,
-                    "ticker": signal.symbol
+                    "ticker": strategy.ticker  # Use symbol from ActivatedStrategy
                 }
                 
                 # Execute through the existing StrategyProcessor
@@ -120,6 +157,7 @@ async def execute_strategy_signal(
                     "strategy_id": strategy.id,
                     "user_id": strategy.user_id,
                     "account_id": strategy.account_id,
+                    "ticker": strategy.ticker,  # Add ticker for response
                     "configured_quantity": strategy.quantity,
                     "success": result.get("status") == "success",
                     "result": result
@@ -156,10 +194,13 @@ async def execute_strategy_signal(
         successful_executions = [r for r in execution_results if r.get("success")]
         failed_executions = [r for r in execution_results if not r.get("success")]
         
+        # Get symbol from first executed strategy (they should all be the same)
+        executed_symbol = execution_results[0]["ticker"] if execution_results else "Unknown"
+        
         return {
             "signal_processed": True,
             "strategy_name": signal.strategy_name,
-            "symbol": signal.symbol,
+            "symbol": executed_symbol,  # Use symbol from ActivatedStrategy
             "action": signal.action,
             "total_strategies": len(execution_results),
             "successful_executions": len(successful_executions),

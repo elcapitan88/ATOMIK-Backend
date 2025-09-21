@@ -369,6 +369,70 @@ class PositionService:
             else:
                 new_position = old_position + position_change
             
+            # VALIDATION AND DEBUGGING: Enhanced position tracking
+            # Log detailed position change information
+            position_type = "unknown"
+            trade_direction = "unknown"
+            
+            # Determine trade direction and position type
+            if new_position > 0:
+                position_type = "LONG"
+            elif new_position < 0:
+                position_type = "SHORT"
+            else:
+                position_type = "FLAT"
+                
+            if position_change > 0:
+                trade_direction = "BUY"
+            elif position_change < 0:
+                trade_direction = "SELL"
+            
+            # Enhanced logging for position changes
+            logger.info(f"Position update details for strategy {strategy_id}:",
+                       extra_context={
+                           "old_position": old_position,
+                           "position_change": position_change,
+                           "new_position": new_position,
+                           "position_type": position_type,
+                           "trade_direction": trade_direction,
+                           "exit_type": exit_type,
+                           "is_absolute": is_absolute,
+                           "symbol": symbol,
+                           "account_id": account_id
+                       })
+            
+            # VALIDATION: Check for potential position direction confusion
+            # This helps catch the issues we saw in the logs
+            if exit_type and "EXIT" in exit_type.upper():
+                # This is an exit trade - validate direction makes sense
+                if position_change > 0:  # BUY action (covers shorts)
+                    if old_position >= 0:
+                        logger.warning(f"BUY exit on non-short position: old={old_position}, change={position_change}",
+                                     extra_context={
+                                         "strategy_id": strategy_id,
+                                         "potential_issue": "BUY exit should only happen on short positions (negative)",
+                                         "exit_type": exit_type
+                                     })
+                elif position_change < 0:  # SELL action (covers longs)
+                    if old_position <= 0:
+                        logger.warning(f"SELL exit on non-long position: old={old_position}, change={position_change}",
+                                     extra_context={
+                                         "strategy_id": strategy_id,
+                                         "potential_issue": "SELL exit should only happen on long positions (positive)",
+                                         "exit_type": exit_type
+                                     })
+            
+            # VALIDATION: Check for reasonable position bounds
+            # This catches extreme values that might indicate calculation errors
+            max_reasonable_position = 1000  # Adjust based on your trading limits
+            if abs(new_position) > max_reasonable_position:
+                logger.warning(f"Unusually large position detected: {new_position}",
+                             extra_context={
+                                 "strategy_id": strategy_id,
+                                 "symbol": symbol,
+                                 "potential_issue": "Position exceeds reasonable bounds"
+                             })
+            
             # Update strategy position tracking
             strategy.last_known_position = new_position
             strategy.last_position_update = datetime.utcnow()
@@ -399,6 +463,70 @@ class PositionService:
         except Exception as e:
             logger.error(f"Error updating database position: {str(e)}")
             self.db.rollback()
+    
+    async def validate_trade_direction(
+        self,
+        strategy_id: int,
+        account_id: str,
+        current_position: int,
+        action: str,
+        exit_type: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """
+        Validate that trade direction makes sense given current position.
+        Returns (is_valid, reason).
+        
+        Args:
+            strategy_id: The strategy ID
+            account_id: The broker account ID
+            current_position: Current position (positive=long, negative=short, 0=flat)
+            action: Trade action (BUY or SELL)
+            exit_type: Exit type if this is an exit trade
+            
+        Returns:
+            Tuple of (is_valid, validation_message)
+        """
+        with logging_context(
+            strategy_id=strategy_id,
+            account_id=account_id,
+            current_position=current_position,
+            action=action,
+            exit_type=exit_type
+        ):
+            # If no exit_type, this is likely an entry trade - generally valid
+            if not exit_type or "EXIT" not in exit_type.upper():
+                logger.debug("Entry trade validation - allowing all directions")
+                return True, "Entry trade - direction validation passed"
+            
+            # This is an exit trade - validate direction
+            if action == "BUY":
+                # BUY exits should only happen when we have a short position to cover
+                if current_position >= 0:
+                    warning_msg = f"BUY exit attempted on non-short position {current_position}"
+                    logger.warning(warning_msg, extra_context={
+                        "validation_failed": True,
+                        "expected": "negative position for BUY exit",
+                        "actual": current_position
+                    })
+                    return False, warning_msg
+                else:
+                    return True, "BUY exit on short position - valid"
+                    
+            elif action == "SELL":
+                # SELL exits should only happen when we have a long position to close
+                if current_position <= 0:
+                    warning_msg = f"SELL exit attempted on non-long position {current_position}"
+                    logger.warning(warning_msg, extra_context={
+                        "validation_failed": True,
+                        "expected": "positive position for SELL exit",
+                        "actual": current_position
+                    })
+                    return False, warning_msg
+                else:
+                    return True, "SELL exit on long position - valid"
+            
+            else:
+                return False, f"Unknown action: {action}"
     
     async def sync_position_with_broker(
         self,

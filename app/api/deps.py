@@ -52,12 +52,20 @@ def get_current_user_optional(
         if not payload:
             return None
         
-        user_id = payload.get("sub")
-        if not user_id:
+        subject = payload.get("sub")
+        if not subject:
             return None
         
-        # Get user from database
-        user = db.query(User).filter(User.id == int(user_id)).first()
+        # Get user from database - subject could be email or user_id
+        user = None
+        try:
+            # First try as user ID (integer)
+            user_id = int(subject)
+            user = db.query(User).filter(User.id == user_id).first()
+        except ValueError:
+            # If not an integer, treat as email
+            user = db.query(User).filter(User.email == subject).first()
+        
         return user
         
     except Exception as e:

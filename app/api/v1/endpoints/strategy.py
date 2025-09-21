@@ -138,15 +138,32 @@ async def activate_strategy(
             from ...models.strategy_code import StrategyCode
             strategy_code = db.query(StrategyCode).filter(
                 StrategyCode.id == strategy.strategy_code_id,
-                StrategyCode.user_id == current_user.id,
-                StrategyCode.is_active == True
+                StrategyCode.is_active == True,
+                StrategyCode.is_validated == True
             ).first()
             
             if not strategy_code:
                 raise HTTPException(
                     status_code=404, 
-                    detail="Strategy code not found or not accessible"
+                    detail="Engine strategy not found or not available"
                 )
+            
+            # Check if user has access to this engine strategy
+            is_owner = strategy_code.user_id == current_user.id
+            
+            # Check engine strategy subscription access
+            is_subscriber = db.query(WebhookSubscription).filter(
+                WebhookSubscription.strategy_code_id == strategy.strategy_code_id,
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine'
+            ).first() is not None
+            
+            if not (is_owner or is_subscriber):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You don't have access to this engine strategy. Please subscribe first."
+                )
+            
             execution_type = 'engine'
 
         # Validate and convert ticker to display format
@@ -528,6 +545,159 @@ async def list_strategies(
             detail="An error occurred while fetching strategies"
         )
 
+
+@router.get("/user-activated", response_model=Dict[str, Any])
+@check_subscription
+async def get_user_activated_strategies(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Get user's activated strategies - strategies they have subscribed to or activated that are currently trading.
+    Returns detailed information including webhook names, follower accounts, performance metrics, etc.
+    This replaces the problematic /list endpoint with proper data enrichment.
+    """
+    try:
+        user_strategies = []
+        
+        # Get user's activated strategies with proper joins
+        activated_strategies = (
+            db.query(ActivatedStrategy)
+            .filter(ActivatedStrategy.user_id == current_user.id)
+            .options(
+                joinedload(ActivatedStrategy.broker_account),
+                joinedload(ActivatedStrategy.leader_broker_account),
+                joinedload(ActivatedStrategy.webhook)
+            )
+            .all()
+        )
+        
+        for strategy in activated_strategies:
+            # Base strategy data
+            strategy_data = {
+                "id": strategy.id,
+                "user_id": strategy.user_id,
+                "strategy_type": strategy.strategy_type,
+                "execution_type": strategy.execution_type,
+                "ticker": strategy.ticker,
+                "account_id": strategy.account_id,
+                "quantity": strategy.quantity,
+                "is_active": strategy.is_active,
+                "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+                "last_triggered": strategy.last_triggered.isoformat() if strategy.last_triggered else None,
+                
+                # Performance metrics
+                "total_trades": strategy.total_trades or 0,
+                "successful_trades": strategy.successful_trades or 0,
+                "failed_trades": strategy.failed_trades or 0,
+                "total_pnl": float(strategy.total_pnl) if strategy.total_pnl else 0.0,
+                "win_rate": float(strategy.win_rate) if strategy.win_rate else 0.0,
+                
+                # Group/Leader info
+                "leader_account_id": strategy.leader_account_id,
+                "leader_quantity": strategy.leader_quantity,
+                "group_name": strategy.group_name,
+                
+                # Broker account info
+                "broker_account": {
+                    "account_id": strategy.broker_account.account_id,
+                    "name": strategy.broker_account.name,
+                    "broker_id": strategy.broker_account.broker_id
+                } if strategy.broker_account else None,
+                
+                # Default values
+                "name": "Unknown Strategy",
+                "description": "Strategy details unavailable",
+                "category": "Unknown"
+            }
+            
+            # Enrich with webhook data if it's a webhook strategy
+            if strategy.webhook_id and strategy.execution_type == "webhook":
+                try:
+                    # Parse webhook_id for database lookup
+                    webhook_id = int(strategy.webhook_id) if isinstance(strategy.webhook_id, str) else strategy.webhook_id
+                    webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+                    
+                    if webhook:
+                        strategy_data.update({
+                            "name": webhook.name,
+                            "description": webhook.details or f"{webhook.name} trading strategy",
+                            "category": "TradingView Webhook",
+                            "source_type": webhook.source_type,
+                            "webhook_token": webhook.token,
+                            "creator_id": webhook.user_id,
+                            "subscriber_count": webhook.subscriber_count or 0
+                        })
+                    else:
+                        logger.warning(f"Webhook {webhook_id} not found for activated strategy {strategy.id}")
+                        strategy_data["name"] = f"Webhook Strategy (ID: {webhook_id})"
+                        
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Invalid webhook_id '{strategy.webhook_id}' for strategy {strategy.id}: {e}")
+                    strategy_data["name"] = f"Invalid Webhook ({strategy.webhook_id})"
+            
+            # Enrich with strategy code data if it's an engine strategy
+            elif strategy.strategy_code_id and strategy.execution_type == "engine":
+                strategy_code = db.query(StrategyCode).filter(
+                    StrategyCode.id == strategy.strategy_code_id
+                ).first()
+                
+                if strategy_code:
+                    strategy_data.update({
+                        "name": strategy_code.name,
+                        "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
+                        "category": "Strategy Engine", 
+                        "source_type": "algorithm",
+                        "symbols": strategy_code.symbols_list if hasattr(strategy_code, 'symbols_list') else [],
+                        "is_validated": strategy_code.is_validated,
+                        "signals_generated": strategy_code.signals_generated if hasattr(strategy_code, 'signals_generated') else 0,
+                        "creator_id": strategy_code.user_id
+                    })
+                else:
+                    logger.warning(f"Strategy code {strategy.strategy_code_id} not found for activated strategy {strategy.id}")
+                    strategy_data["name"] = f"Strategy Engine (ID: {strategy.strategy_code_id})"
+            
+            # Handle follower accounts for group strategies
+            if strategy.strategy_type == "multiple":
+                try:
+                    follower_accounts = strategy.get_follower_accounts() if hasattr(strategy, 'get_follower_accounts') else []
+                    strategy_data["follower_accounts"] = follower_accounts
+                    strategy_data["leader_broker_account"] = {
+                        "account_id": strategy.leader_broker_account.account_id,
+                        "name": strategy.leader_broker_account.name,
+                        "broker_id": strategy.leader_broker_account.broker_id
+                    } if strategy.leader_broker_account else None
+                except Exception as e:
+                    logger.error(f"Error getting follower accounts for strategy {strategy.id}: {e}")
+                    strategy_data["follower_accounts"] = []
+                    strategy_data["leader_broker_account"] = None
+            
+            user_strategies.append(strategy_data)
+        
+        # Sort by most recently triggered/created
+        user_strategies.sort(
+            key=lambda x: x.get("last_triggered") or x.get("created_at") or "", 
+            reverse=True
+        )
+        
+        logger.info(f"Returning {len(user_strategies)} activated strategies for user {current_user.id}")
+        
+        return {
+            "strategies": user_strategies,
+            "total": len(user_strategies),
+            "user_id": current_user.id,
+            "active_count": sum(1 for s in user_strategies if s.get("is_active", False))
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user activated strategies: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch user activated strategies: {str(e)}"
+        )
+
+
 @router.post("/{strategy_id}/toggle")
 @check_subscription
 async def toggle_strategy(
@@ -853,17 +1023,34 @@ async def configure_engine_strategy(
     try:
         logger.info(f"Configuring Engine strategy for user {current_user.id}")
         
-        # Validate strategy code exists and belongs to user
+        # Validate strategy code exists and user has access (owner or subscriber)
         strategy_code = db.query(StrategyCode).filter(
-            StrategyCode.id == strategy.strategy_code_id,
-            StrategyCode.user_id == current_user.id
+            StrategyCode.id == strategy.strategy_code_id
         ).first()
         
         if not strategy_code:
             raise HTTPException(
                 status_code=404,
-                detail="Strategy code not found or access denied"
+                detail="Strategy code not found"
             )
+        
+        # Check if user is owner OR subscriber
+        is_owner = strategy_code.user_id == current_user.id
+        
+        subscription = None
+        if not is_owner:
+            # Check if user has subscription to this strategy
+            subscription = db.query(WebhookSubscription).filter(
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine',
+                WebhookSubscription.strategy_code_id == strategy.strategy_code_id
+            ).first()
+            
+            if not subscription:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied - you must own or be subscribed to this strategy"
+                )
         
         if not strategy_code.is_validated:
             raise HTTPException(
@@ -948,6 +1135,7 @@ async def configure_engine_strategy(
             user_id=current_user.id,
             strategy_type=strategy.strategy_type.value,
             execution_type='engine',  # Key difference from webhook strategies
+            webhook_id=None,  # Explicitly None for engine strategies
             strategy_code_id=strategy.strategy_code_id,
             ticker=display_ticker,
             

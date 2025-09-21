@@ -3,13 +3,14 @@ import logging
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 
 from ....db.session import get_db
 from ....core.config import settings
 from ....core.security import get_current_user
 from ....models.user import User
 from ....models.strategy_code import StrategyCode
+from ....models.webhook import WebhookSubscription
 from datetime import datetime
 
 router = APIRouter()
@@ -46,8 +47,16 @@ class StrategyCodeResponse(BaseModel):
     version: int
     created_at: str
     updated_at: str
-    signals_generated: int
-    error_count: int
+    signals_generated: Optional[int] = 0
+    error_count: Optional[int] = 0
+
+    @validator('signals_generated', pre=True)
+    def validate_signals_generated(cls, v):
+        return v if v is not None else 0
+    
+    @validator('error_count', pre=True)
+    def validate_error_count(cls, v):
+        return v if v is not None else 0
 
     class Config:
         from_attributes = True
@@ -197,16 +206,45 @@ async def upload_strategy_code(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @router.get("/my-strategies", response_model=List[StrategyCodeResponse])
 async def get_user_strategies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all strategy codes for current user."""
+    """Get all strategy codes accessible to the user (owned or subscribed)."""
     try:
-        strategies = db.query(StrategyCode).filter(
+        # Get strategies the user owns
+        owned_strategies = db.query(StrategyCode).filter(
             StrategyCode.user_id == current_user.id
-        ).order_by(StrategyCode.created_at.desc()).all()
+        ).all()
+        
+        # Get strategy IDs the user is subscribed to via engine subscriptions
+        subscriptions = db.query(WebhookSubscription).filter(
+            WebhookSubscription.user_id == current_user.id,
+            WebhookSubscription.strategy_type == 'engine',
+            WebhookSubscription.strategy_code_id != None
+        ).all()
+        
+        subscribed_strategy_ids = [sub.strategy_code_id for sub in subscriptions]
+        
+        # Get the subscribed strategies
+        subscribed_strategies = []
+        if subscribed_strategy_ids:
+            subscribed_strategies = db.query(StrategyCode).filter(
+                StrategyCode.id.in_(subscribed_strategy_ids)
+            ).all()
+        
+        # Combine owned and subscribed strategies (remove duplicates)
+        all_strategies = {}
+        for strategy in owned_strategies:
+            all_strategies[strategy.id] = strategy
+        for strategy in subscribed_strategies:
+            if strategy.id not in all_strategies:  # Only add if not already owned
+                all_strategies[strategy.id] = strategy
+        
+        # Sort by created_at desc
+        strategies = sorted(all_strategies.values(), key=lambda x: x.created_at, reverse=True)
         
         return [
             StrategyCodeResponse(
