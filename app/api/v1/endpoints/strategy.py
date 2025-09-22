@@ -137,7 +137,7 @@ async def activate_strategy(
                 logger.info("Converting Break N Enter activation to engine execution")
 
                 # Find the corresponding strategy_code
-                from ...models.strategy_code import StrategyCode
+                # StrategyCode is already imported at the top
                 strategy_code = db.query(StrategyCode).filter(
                     StrategyCode.name == 'break_and_enter',
                     StrategyCode.is_active == True,
@@ -155,7 +155,7 @@ async def activate_strategy(
             
         elif strategy.strategy_code_id:
             # Engine-based strategy validation
-            from ...models.strategy_code import StrategyCode
+            # StrategyCode is already imported at the top
             strategy_code = db.query(StrategyCode).filter(
                 StrategyCode.id == strategy.strategy_code_id,
                 StrategyCode.is_active == True,
