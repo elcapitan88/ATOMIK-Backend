@@ -186,6 +186,7 @@ async def execute_strategy_signal(
                     "strategy_id": strategy.id,
                     "user_id": strategy.user_id,
                     "account_id": strategy.account_id,
+                    "ticker": strategy.ticker,  # Add missing ticker field
                     "success": False,
                     "error": str(exec_error)
                 })
