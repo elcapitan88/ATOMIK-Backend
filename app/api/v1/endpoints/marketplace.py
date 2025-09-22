@@ -138,9 +138,11 @@ async def get_available_strategies(
         
         # 2. Get Strategy Engine Strategies (from strategy_codes table)
         # Show all active, validated engine strategies in marketplace
+        # EXCLUDE break_and_enter since it's handled via webhook activation
         engine_strategies = db.query(StrategyCode).filter(
             StrategyCode.is_active == True,
-            StrategyCode.is_validated == True
+            StrategyCode.is_validated == True,
+            StrategyCode.name != 'break_and_enter'  # Hide from marketplace, handled via webhook
         ).all()
         
         for strategy_code in engine_strategies:
