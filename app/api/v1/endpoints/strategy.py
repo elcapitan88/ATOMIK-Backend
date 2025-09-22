@@ -131,7 +131,27 @@ async def activate_strategy(
                     status_code=403,
                     detail="You don't have access to this webhook"
                 )
-            execution_type = 'webhook'
+
+            # SPECIAL CASE: Break N Enter should use engine execution
+            if webhook.id == 117:  # Break N Enter webhook ID
+                logger.info("Converting Break N Enter activation to engine execution")
+
+                # Find the corresponding strategy_code
+                from ...models.strategy_code import StrategyCode
+                strategy_code = db.query(StrategyCode).filter(
+                    StrategyCode.name == 'break_and_enter',
+                    StrategyCode.is_active == True,
+                    StrategyCode.is_validated == True
+                ).first()
+
+                if strategy_code:
+                    logger.info(f"Found strategy_code {strategy_code.id} for Break N Enter")
+                    execution_type = 'engine'
+                else:
+                    logger.warning("Break N Enter strategy_code not found, falling back to webhook")
+                    execution_type = 'webhook'
+            else:
+                execution_type = 'webhook'
             
         elif strategy.strategy_code_id:
             # Engine-based strategy validation
@@ -204,8 +224,10 @@ async def activate_strategy(
                     ).first()
                     error_detail = "A strategy with this webhook and account already exists"
                 else:  # engine
+                    # For engine mode, check against strategy_code_id
+                    strategy_code_to_check = strategy_code.id if strategy_code else strategy.strategy_code_id
                     existing_strategy = db.query(ActivatedStrategy).filter(
-                        ActivatedStrategy.strategy_code_id == strategy.strategy_code_id,
+                        ActivatedStrategy.strategy_code_id == strategy_code_to_check,
                         ActivatedStrategy.account_id == str(strategy.account_id),
                         ActivatedStrategy.user_id == current_user.id
                     ).first()
@@ -213,14 +235,18 @@ async def activate_strategy(
 
                 if existing_strategy:
                     raise HTTPException(status_code=400, detail=error_detail)
-                
+
                 # Create single account strategy with appropriate execution type
+                # For Break N Enter engine mode, use strategy_code_id instead of webhook_id
+                final_webhook_id = str(strategy.webhook_id) if strategy.webhook_id and execution_type == 'webhook' else None
+                final_strategy_code_id = strategy_code.id if strategy_code else (strategy.strategy_code_id if strategy.strategy_code_id else None)
+
                 db_strategy = ActivatedStrategy(
                     user_id=current_user.id,
                     strategy_type="single",
                     execution_type=execution_type,
-                    webhook_id=str(strategy.webhook_id) if strategy.webhook_id else None,
-                    strategy_code_id=strategy.strategy_code_id if strategy.strategy_code_id else None,
+                    webhook_id=final_webhook_id,
+                    strategy_code_id=final_strategy_code_id,
                     ticker=display_ticker,
                     account_id=str(strategy.account_id),
                     quantity=strategy.quantity,
