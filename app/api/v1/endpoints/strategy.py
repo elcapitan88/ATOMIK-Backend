@@ -593,7 +593,8 @@ async def get_user_activated_strategies(
             .options(
                 joinedload(ActivatedStrategy.broker_account),
                 joinedload(ActivatedStrategy.leader_broker_account),
-                joinedload(ActivatedStrategy.webhook)
+                joinedload(ActivatedStrategy.webhook),
+                joinedload(ActivatedStrategy.strategy_code)
             )
             .all()
         )
@@ -664,10 +665,9 @@ async def get_user_activated_strategies(
             
             # Enrich with strategy code data if it's an engine strategy
             elif strategy.strategy_code_id and strategy.execution_type == "engine":
-                strategy_code = db.query(StrategyCode).filter(
-                    StrategyCode.id == strategy.strategy_code_id
-                ).first()
-                
+                # Use the preloaded relationship instead of making another query
+                strategy_code = strategy.strategy_code
+
                 if strategy_code:
                     strategy_data.update({
                         "name": strategy_code.name,
