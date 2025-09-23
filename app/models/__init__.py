@@ -9,6 +9,7 @@ from .trade import Trade, TradeExecution
 from .maintenance import MaintenanceSettings
 from .affiliate import Affiliate, AffiliateReferral, AffiliateClick, AffiliatePayout
 from .creator_profile import CreatorProfile
+from .creator_follower import CreatorFollower
 from .strategy_pricing import StrategyPricing, PricingType, BillingInterval
 from .strategy_purchase import StrategyPurchase, PurchaseStatus, PurchaseType
 from .creator_earnings import CreatorEarnings, PayoutStatus
@@ -34,6 +35,7 @@ __all__ = [
     "AffiliateClick",
     "AffiliatePayout",
     "CreatorProfile",
+    "CreatorFollower",
     "StrategyPricing",
     "PricingType",
     "BillingInterval",

@@ -16,7 +16,7 @@ try:
     logger.info("Admin endpoint imported successfully")
     
     # Import working endpoints (excluding interactivebrokers which breaks)
-    from .endpoints import creators, chat, feature_flags, marketplace, aria, affiliate
+    from .endpoints import creators, chat, feature_flags, marketplace, aria, affiliate, creator_profiles
     logger.info("Working endpoints imported successfully (including ARIA and affiliate)")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
@@ -103,6 +103,13 @@ try:
     logger.info("Affiliate router registered")
 except Exception as e:
     logger.error(f"Error registering affiliate router: {e}")
+
+# Creator Profiles router (social features)
+try:
+    api_router.include_router(creator_profiles.router, prefix="/creators", tags=["creator-profiles"])
+    logger.info("Creator profiles router registered")
+except Exception as e:
+    logger.error(f"Error registering creator profiles router: {e}")
 
 # Interactive Brokers router - Re-enabled after dependency fixes (July 27, 2025)
 try:
