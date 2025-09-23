@@ -130,8 +130,8 @@ async def get_creator_strategies(
         strategy_list.append({
             "id": str(strategy.id),
             "webhook_id": strategy.webhook_id,
-            "name": strategy.webhook.strategy_name,
-            "description": strategy.webhook.description,
+            "name": strategy.webhook.name,
+            "description": strategy.webhook.details,
             "stripe_product_id": strategy.stripe_product_id,
             "total_subscribers": strategy.total_subscribers,
             "estimated_monthly_revenue": float(strategy.estimated_monthly_revenue),
