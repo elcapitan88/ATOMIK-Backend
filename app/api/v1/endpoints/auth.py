@@ -304,26 +304,32 @@ async def update_profile(
                 update_data[field] = profile_data[field]
         
         # Handle nested fields like socialMedia
+        social_media_updated = False
         if "socialMedia" in profile_data and isinstance(profile_data["socialMedia"], dict):
             social_data = profile_data["socialMedia"]
             # Map frontend social media fields to backend columns
             if "twitter" in social_data:  # Frontend still uses "twitter" key
                 current_user.x_handle = social_data["twitter"]
+                social_media_updated = True
             if "tiktok" in social_data:
                 current_user.tiktok_handle = social_data["tiktok"]
+                social_media_updated = True
             if "instagram" in social_data:
                 current_user.instagram_handle = social_data["instagram"]
+                social_media_updated = True
             if "youtube" in social_data:
                 current_user.youtube_handle = social_data["youtube"]
+                social_media_updated = True
             if "discord" in social_data:
                 current_user.discord_handle = social_data["discord"]
-            
+                social_media_updated = True
+
         # Handle preferences
         if "preferences" in profile_data and isinstance(profile_data["preferences"], dict):
             # Serialize preferences as JSON or create separate columns as needed
             pass
-            
-        if update_data:
+
+        if update_data or social_media_updated:
             # Update user record
             for key, value in update_data.items():
                 setattr(current_user, key, value)
@@ -337,9 +343,9 @@ async def update_profile(
             logger.info(f"Profile updated for user ID {current_user.id}")
             
             # Return updated user data (excluding sensitive fields)
-            return {
+            response_data = {
                 "id": current_user.id,
-                "username": current_user.username, 
+                "username": current_user.username,
                 "email": current_user.email,
                 "full_name": current_user.full_name,
                 "phone": current_user.phone,
@@ -348,6 +354,18 @@ async def update_profile(
                 "is_active": current_user.is_active,
                 "message": "Profile updated successfully"
             }
+
+            # Include social media data if it was updated
+            if social_media_updated:
+                response_data["socialMedia"] = {
+                    "twitter": current_user.x_handle,
+                    "tiktok": current_user.tiktok_handle,
+                    "instagram": current_user.instagram_handle,
+                    "youtube": current_user.youtube_handle,
+                    "discord": current_user.discord_handle
+                }
+
+            return response_data
         else:
             return {"message": "No valid fields to update"}
             
