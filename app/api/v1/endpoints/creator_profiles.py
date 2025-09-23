@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, desc
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, get_current_user_optional
 from app.models.user import User
 from app.models.creator_profile import CreatorProfile
 from app.models.creator_follower import CreatorFollower
@@ -23,7 +23,7 @@ router = APIRouter()
 async def get_creator_profile_by_username(
     username: str,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """Get creator profile by username for public viewing."""
 
@@ -93,7 +93,8 @@ async def get_creator_strategies(
     creator_id: int,
     db: Session = Depends(get_db),
     limit: int = Query(20, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """Get list of creator's published strategies."""
 
