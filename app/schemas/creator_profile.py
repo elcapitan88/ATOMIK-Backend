@@ -36,11 +36,14 @@ class CreatorStrategyItem(BaseModel):
     webhook_id: int
     name: str
     description: Optional[str] = None
-    stripe_product_id: str
+    stripe_product_id: Optional[str] = None  # Can be None for free strategies
     total_subscribers: int = 0
     estimated_monthly_revenue: float = 0.0
     min_price: Optional[float] = None
     created_at: datetime
+    is_monetized: bool = False  # Indicates if strategy is monetized
+    usage_intent: Optional[str] = None  # personal, share_free, monetize
+    rating: float = 0.0  # Strategy rating
 
     class Config:
         from_attributes = True

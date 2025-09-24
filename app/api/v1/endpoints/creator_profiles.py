@@ -96,53 +96,60 @@ async def get_creator_strategies(
     offset: int = Query(0, ge=0),
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
-    """Get list of creator's published strategies."""
+    """Get list of creator's shared strategies (both monetized and free)."""
 
     # Verify creator exists
     creator = db.query(User).filter(User.id == creator_id).first()
     if not creator:
         raise HTTPException(status_code=404, detail="Creator not found")
 
-    # Get paginated strategies with webhook details
-    strategies_query = db.query(StrategyMonetization).join(
-        Webhook, StrategyMonetization.webhook_id == Webhook.id
-    ).filter(
+    # Get shared webhooks (both monetized and non-monetized)
+    shared_webhooks = db.query(Webhook).filter(
         and_(
-            StrategyMonetization.creator_user_id == creator_id,
-            StrategyMonetization.is_active == True
+            Webhook.user_id == creator_id,
+            Webhook.is_shared == True,
+            Webhook.is_active == True
         )
-    ).options(
-        joinedload(StrategyMonetization.webhook),
-        joinedload(StrategyMonetization.prices)
-    ).order_by(desc(StrategyMonetization.created_at))
+    ).order_by(desc(Webhook.sharing_enabled_at)).all()
 
-    total = strategies_query.count()
-    strategies = strategies_query.offset(offset).limit(limit).all()
+    # Apply pagination
+    total = len(shared_webhooks)
+    paginated_webhooks = shared_webhooks[offset:offset + limit]
 
     # Build strategy list response
     strategy_list = []
-    for strategy in strategies:
-        # Get minimum price for display
+    for webhook in paginated_webhooks:
+        # Check if webhook is monetized
+        monetization = db.query(StrategyMonetization).filter(
+            StrategyMonetization.webhook_id == webhook.id
+        ).first()
+
+        # Get minimum price for monetized strategies
         min_price = None
-        if strategy.prices:
-            min_price = min(float(price.amount) for price in strategy.prices)
+        estimated_revenue = 0.0
+        if monetization and monetization.prices:
+            min_price = min(float(price.amount) for price in monetization.prices)
+            estimated_revenue = float(monetization.estimated_monthly_revenue)
 
         strategy_list.append({
-            "id": str(strategy.id),
-            "webhook_id": strategy.webhook_id,
-            "name": strategy.webhook.name,
-            "description": strategy.webhook.details,
-            "stripe_product_id": strategy.stripe_product_id,
-            "total_subscribers": strategy.total_subscribers,
-            "estimated_monthly_revenue": float(strategy.estimated_monthly_revenue),
+            "id": str(monetization.id) if monetization else f"webhook_{webhook.id}",
+            "webhook_id": webhook.id,
+            "name": webhook.name,
+            "description": webhook.details,
+            "stripe_product_id": monetization.stripe_product_id if monetization else None,
+            "total_subscribers": webhook.subscriber_count or 0,
+            "estimated_monthly_revenue": estimated_revenue,
             "min_price": min_price,
-            "created_at": strategy.created_at
+            "created_at": webhook.sharing_enabled_at or webhook.created_at,
+            "is_monetized": monetization is not None,
+            "usage_intent": webhook.usage_intent,
+            "rating": webhook.rating or 0.0
         })
 
     return CreatorStrategyList(
         strategies=strategy_list,
         total=total,
-        has_more=offset + len(strategies) < total
+        has_more=offset + len(strategy_list) < total
     )
 
 

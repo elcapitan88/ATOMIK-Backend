@@ -165,6 +165,15 @@ class FeatureFlagService:
                 description="Premium onboarding flow and Trading Lab dashboard with network synchronization",
                 dependencies=[],
                 metadata={"category": "UI Enhancements", "priority": "high"}
+            ),
+            "aria-assistant": FeatureConfig(
+                name="aria-assistant",
+                status=FeatureStatus.BETA,
+                rollout_strategy=RolloutStrategy.ROLE_BASED,
+                target_roles=["Admin", "Beta Tester"],
+                description="ARIA AI assistant for trading insights and voice-controlled strategy management",
+                dependencies=[],
+                metadata={"category": "App Features", "priority": "high"}
             )
         }
     
@@ -533,3 +542,4 @@ require_broker_integration_v2 = create_feature_flag_decorator("broker-integratio
 require_member_chat = create_feature_flag_decorator("member-chat")
 require_strategy_builder = create_feature_flag_decorator("strategy-builder")
 require_atomik_trading_lab = create_feature_flag_decorator("atomik-trading-lab")
+require_aria_assistant = create_feature_flag_decorator("aria-assistant")
