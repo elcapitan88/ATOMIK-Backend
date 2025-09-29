@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import requests
 import logging
 import json
+import uuid
 from sqlalchemy.exc import IntegrityError
 import aiohttp
 import base64
@@ -40,7 +41,11 @@ class TradovateTimeInForce:
 
 class TradovateBroker(BaseBroker):
     """Tradovate broker implementation"""
-    
+
+    # Generate consistent deviceId for this backend instance
+    # Using UUID5 with DNS namespace ensures deterministic, unique identifier
+    DEVICE_ID = str(uuid.uuid5(uuid.NAMESPACE_DNS, 'atomik-backend.tradovate'))
+
     def __init__(self, broker_id: str, db: Session):
         super().__init__(broker_id, db)
         self.api_urls = {
@@ -143,15 +148,18 @@ class TradovateBroker(BaseBroker):
             logger.info(f"Using auth code: {code_sample}")
             
             # Method 1: Standard form-encoded POST with client ID and secret in body
+            # Include deviceId to prevent token conflicts across multiple sub-accounts
             form_data = {
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": settings.TRADOVATE_REDIRECT_URI,
                 "client_id": settings.TRADOVATE_CLIENT_ID,
                 "client_secret": settings.TRADOVATE_CLIENT_SECRET,
+                "deviceId": self.DEVICE_ID
             }
-            
+
             logger.info(f"Using form parameters: {[k for k in form_data.keys()]}")
+            logger.info(f"Using deviceId: {self.DEVICE_ID}")
             
             response = requests.post(
                 exchange_url,
@@ -164,14 +172,15 @@ class TradovateBroker(BaseBroker):
             # Try alternate auth method if first fails
             if response.status_code != 200 or ('error' in response.json()):
                 logger.warning("First auth method failed, trying alternative with Basic Auth")
-                
+
                 # Method 2: Try with client ID and secret in Authorization header
                 response = requests.post(
                     exchange_url,
                     data={
                         "grant_type": "authorization_code",
                         "code": code,
-                        "redirect_uri": settings.TRADOVATE_REDIRECT_URI
+                        "redirect_uri": settings.TRADOVATE_REDIRECT_URI,
+                        "deviceId": self.DEVICE_ID
                     },
                     auth=(settings.TRADOVATE_CLIENT_ID, settings.TRADOVATE_CLIENT_SECRET),
                     headers={
@@ -838,7 +847,7 @@ class TradovateBroker(BaseBroker):
                 "orderType": "Market",  # Hardcode for now to debug
                 "action": order_data["side"].capitalize(),
                 "timeInForce": "GTC",
-                "isAutomated": False
+                "isAutomated": True  # Changed: API orders are automated by definition
             }
 
             # Log the exact payload being sent to Tradovate
