@@ -1241,28 +1241,74 @@ async def verify_purchase_session(
     """
     try:
         import stripe
-        
-        # Retrieve the session from Stripe
-        session = stripe.checkout.Session.retrieve(session_id)
-        
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Checkout session not found"
-            )
-        
+
+        # First, try to retrieve the session from main account to get metadata
+        session = None
+        creator_profile = None
+
+        try:
+            # Try retrieving from main account first
+            session = stripe.checkout.Session.retrieve(session_id)
+        except stripe.error.InvalidRequestError as e:
+            # Session might be on a connected account
+            # We need to find which connected account to check
+            logger.warning(f"Session {session_id} not found on main account, checking connected accounts")
+
+            # Get all creator profiles with connected accounts
+            creator_profiles = db.query(CreatorProfile).filter(
+                CreatorProfile.stripe_connect_account_id.isnot(None)
+            ).all()
+
+            # Try each connected account
+            for profile in creator_profiles:
+                try:
+                    session = stripe.checkout.Session.retrieve(
+                        session_id,
+                        stripe_account=profile.stripe_connect_account_id
+                    )
+                    creator_profile = profile
+                    logger.info(f"Found session {session_id} on connected account {profile.stripe_connect_account_id}")
+                    break
+                except stripe.error.InvalidRequestError:
+                    continue
+
+            if not session:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Checkout session not found"
+                )
+
+        # If we still don't have creator_profile but have metadata, get it
+        metadata = session.metadata or {}
+        creator_id = metadata.get('creator_id')
+
+        if not creator_profile and creator_id:
+            creator_profile = db.query(CreatorProfile).filter(
+                CreatorProfile.id == int(creator_id)
+            ).first()
+
+            # If we have a creator profile with connected account, re-retrieve session from there
+            if creator_profile and creator_profile.stripe_connect_account_id:
+                try:
+                    session = stripe.checkout.Session.retrieve(
+                        session_id,
+                        stripe_account=creator_profile.stripe_connect_account_id
+                    )
+                    logger.info(f"Re-retrieved session {session_id} from connected account {creator_profile.stripe_connect_account_id}")
+                except Exception as e:
+                    logger.warning(f"Could not re-retrieve from connected account: {e}")
+
         # Check if payment was successful
         if session.payment_status != 'paid' and session.mode != 'subscription':
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Payment not completed"
             )
-        
+
         # Get metadata from session
-        metadata = session.metadata or {}
         user_id = metadata.get('user_id')
         webhook_id = metadata.get('webhook_id')
-        
+
         # Verify the user owns this session
         if str(current_user.id) != user_id:
             raise HTTPException(
