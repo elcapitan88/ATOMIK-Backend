@@ -791,15 +791,28 @@ async def subscribe_to_strategy(
             
             if pricing and pricing.pricing_type != "free":
                 # This is a monetized strategy - require payment
+                # Include pricing details to help frontend display them immediately
+                pricing_info = {
+                    "type": pricing.pricing_type,
+                    "monthly_price": float(pricing.base_amount) if pricing.base_amount else None,
+                    "yearly_price": float(pricing.yearly_amount) if pricing.yearly_amount else None,
+                    "currency": "USD",
+                    "has_trial": pricing.is_trial_enabled,
+                    "trial_days": pricing.trial_days if pricing.is_trial_enabled else 0
+                }
+
                 raise HTTPException(
                     status_code=402,  # Payment Required
                     detail={
                         "error_code": "PAYMENT_REQUIRED",
-                        "message": "This strategy requires payment. Please use the marketplace purchase flow.",
+                        "message": "This strategy requires a paid subscription.",
                         "strategy_name": webhook.name,
+                        "strategy_token": token,
                         "is_monetized": True,
-                        "marketplace_url": f"/marketplace/strategy/{token}/purchase",
-                        "pricing_endpoint": f"/api/v1/marketplace/strategies/{token}/pricing"
+                        "pricing": pricing_info,
+                        "checkout_endpoint": f"/api/v1/marketplace/strategies/{token}/create-checkout",
+                        "pricing_endpoint": f"/api/v1/marketplace/strategies/{token}/pricing",
+                        "marketplace_url": f"/marketplace/strategy/{token}"
                     }
                 )
 
@@ -851,6 +864,101 @@ async def subscribe_to_strategy(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to subscribe to strategy: {str(e)}"
+        )
+
+@router.get("/{token}/access-info")
+async def get_strategy_access_info(
+    token: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check user's access to a strategy and get monetization info.
+    Returns whether user has access and how (owner/subscriber/purchaser).
+    For monetized strategies, includes pricing information.
+    """
+    try:
+        webhook = db.query(Webhook).filter(
+            Webhook.token == token
+        ).first()
+
+        if not webhook:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # Check user's access
+        is_owner = webhook.user_id == current_user.id
+
+        # Check for free subscription
+        has_subscription = db.query(WebhookSubscription).filter(
+            WebhookSubscription.webhook_id == webhook.id,
+            WebhookSubscription.user_id == current_user.id
+        ).first() is not None
+
+        # Check for paid purchase
+        from ....models.strategy_purchase import StrategyPurchase
+        has_purchase = db.query(StrategyPurchase).filter(
+            StrategyPurchase.webhook_id == webhook.id,
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.status.in_(["pending", "completed"])
+        ).first() is not None
+
+        # Get pricing info if monetized
+        pricing_info = None
+        if webhook.is_monetized or webhook.usage_intent == 'monetize':
+            from ....models.strategy_pricing import StrategyPricing
+            pricing = db.query(StrategyPricing).filter(
+                StrategyPricing.webhook_id == webhook.id,
+                StrategyPricing.is_active == True
+            ).first()
+
+            if pricing:
+                pricing_info = {
+                    "type": pricing.pricing_type,
+                    "monthly_price": float(pricing.base_amount) if pricing.base_amount else None,
+                    "yearly_price": float(pricing.yearly_amount) if pricing.yearly_amount else None,
+                    "currency": "USD",
+                    "has_trial": pricing.is_trial_enabled,
+                    "trial_days": pricing.trial_days if pricing.is_trial_enabled else 0,
+                    "checkout_endpoint": f"/api/v1/marketplace/strategies/{token}/create-checkout"
+                }
+
+        # Determine access method
+        access_method = None
+        has_access = False
+
+        if is_owner:
+            access_method = "owner"
+            has_access = True
+        elif has_purchase:
+            access_method = "purchased"
+            has_access = True
+        elif has_subscription:
+            access_method = "subscribed"
+            has_access = True
+
+        # Special handling for Break N Enter
+        is_hybrid_strategy = webhook.id == 117  # Break N Enter
+
+        return {
+            "strategy_name": webhook.name,
+            "strategy_token": token,
+            "is_monetized": webhook.is_monetized,
+            "has_access": has_access,
+            "access_method": access_method,
+            "is_owner": is_owner,
+            "is_hybrid_strategy": is_hybrid_strategy,
+            "pricing": pricing_info,
+            "can_subscribe_free": not webhook.is_monetized and webhook.is_shared,
+            "requires_purchase": webhook.is_monetized and not has_access
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting strategy access info: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get strategy access info: {str(e)}"
         )
 
 @router.post("/{token}/unsubscribe")
