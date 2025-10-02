@@ -1,5 +1,5 @@
 # app/api/v1/endpoints/marketplace.py
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
