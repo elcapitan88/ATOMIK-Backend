@@ -1450,19 +1450,26 @@ async def rate_strategy(
                 WebhookSubscription.webhook_id == webhook.id,
                 WebhookSubscription.user_id == current_user.id
             ).first()
-            
-            if not subscription:
+
+            # Also check if user has an activated strategy (they might have it without a subscription record)
+            from app.models.strategy import ActivatedStrategy
+            has_activated = db.query(ActivatedStrategy).filter(
+                ActivatedStrategy.webhook_id == source_id,  # webhook_id stores the token
+                ActivatedStrategy.user_id == current_user.id
+            ).first()
+
+            if not subscription and not has_activated:
                 # Check if user has purchased it
                 purchase = db.query(StrategyPurchase).filter(
                     StrategyPurchase.user_id == current_user.id,
                     StrategyPurchase.webhook_id == webhook.id,
                     StrategyPurchase.status == PurchaseStatus.COMPLETED
                 ).first()
-                
+
                 if not purchase:
                     raise HTTPException(
                         status_code=403,
-                        detail="You must be subscribed or have purchased this strategy to rate it"
+                        detail="You must be subscribed, have activated, or have purchased this strategy to rate it"
                     )
             
             # Handle webhook rating
