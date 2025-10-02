@@ -471,7 +471,8 @@ async def list_strategies(
             .options(
                 joinedload(ActivatedStrategy.broker_account),
                 joinedload(ActivatedStrategy.leader_broker_account),
-                joinedload(ActivatedStrategy.webhook)
+                joinedload(ActivatedStrategy.webhook),
+                joinedload(ActivatedStrategy.strategy_code)
             )
             .all()
         )
@@ -503,6 +504,8 @@ async def list_strategies(
                     "id": strategy.id,
                     "strategy_type": strategy.strategy_type,
                     "webhook_id": strategy.webhook_id,
+                    "strategy_code_id": strategy.strategy_code_id,
+                    "execution_type": strategy.execution_type,
                     "ticker": strategy.ticker,
                     "is_active": strategy.is_active,
                     "created_at": strategy.created_at,
@@ -512,6 +515,14 @@ async def list_strategies(
                         "source_type": strategy.webhook.source_type if strategy.webhook else "custom"
                     }
                 }
+
+                # Add strategy name based on type
+                if strategy.execution_type == "engine" and strategy.strategy_code:
+                    strategy_data["name"] = strategy.strategy_code.name
+                elif strategy.webhook:
+                    strategy_data["name"] = strategy.webhook.name
+                else:
+                    strategy_data["name"] = "Unknown Strategy"
 
                 if strategy.strategy_type == "single":
                     # Add single strategy specific fields
