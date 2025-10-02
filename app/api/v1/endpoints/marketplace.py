@@ -1347,3 +1347,170 @@ async def verify_purchase_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to verify purchase"
         )
+
+@router.post("/strategies/{source_id}/rate")
+async def rate_strategy(
+    source_id: str,
+    rating: int = Body(..., embed=True, ge=1, le=5),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Unified rating endpoint for both webhook and engine strategies.
+    
+    Args:
+        source_id: Either webhook token (string) or engine strategy ID (numeric string)
+        rating: Rating value between 1 and 5
+    """
+    try:
+        from app.models.webhook import WebhookRating
+        from datetime import datetime
+        
+        logger.info(f"Rating request - Source ID: {source_id}, Rating: {rating}, User: {current_user.id}")
+        
+        # Determine if this is an engine strategy (numeric) or webhook (token)
+        is_engine_strategy = source_id.isdigit()
+        
+        if is_engine_strategy:
+            strategy_id = int(source_id)
+            
+            # Get the engine strategy
+            strategy = db.query(StrategyCode).filter(
+                StrategyCode.id == strategy_id,
+                StrategyCode.is_active == True
+            ).first()
+            
+            if not strategy:
+                raise HTTPException(status_code=404, detail="Strategy not found")
+            
+            # Check if user is subscribed
+            subscription = db.query(WebhookSubscription).filter(
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine',
+                WebhookSubscription.strategy_code_id == strategy_id
+            ).first()
+            
+            if not subscription:
+                # Check if user has purchased it
+                purchase = db.query(StrategyPurchase).filter(
+                    StrategyPurchase.user_id == current_user.id,
+                    StrategyPurchase.strategy_code_id == strategy_id,
+                    StrategyPurchase.status == PurchaseStatus.COMPLETED
+                ).first()
+                
+                if not purchase:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You must be subscribed or have purchased this strategy to rate it"
+                    )
+            
+            # Handle engine strategy rating
+            existing_rating = db.query(WebhookRating).filter(
+                WebhookRating.strategy_code_id == strategy_id,
+                WebhookRating.user_id == current_user.id
+            ).first()
+            
+            if existing_rating:
+                existing_rating.rating = rating
+                existing_rating.rated_at = datetime.utcnow()
+            else:
+                new_rating = WebhookRating(
+                    strategy_code_id=strategy_id,
+                    user_id=current_user.id,
+                    rating=rating,
+                    rated_at=datetime.utcnow()
+                )
+                db.add(new_rating)
+            
+            # Update average rating
+            all_ratings = db.query(WebhookRating).filter(
+                WebhookRating.strategy_code_id == strategy_id
+            ).all()
+            
+            if all_ratings:
+                total_ratings = len(all_ratings)
+                rating_sum = sum(r.rating for r in all_ratings)
+                avg_rating = rating_sum / total_ratings if total_ratings > 0 else 0
+                
+                strategy.rating = avg_rating
+                strategy.total_ratings = total_ratings
+            
+        else:
+            # Handle webhook strategy rating
+            webhook = db.query(Webhook).filter(
+                Webhook.token == source_id,
+                Webhook.is_shared == True
+            ).first()
+            
+            if not webhook:
+                raise HTTPException(status_code=404, detail="Strategy not found")
+            
+            # Check if user is subscribed
+            subscription = db.query(WebhookSubscription).filter(
+                WebhookSubscription.webhook_id == webhook.id,
+                WebhookSubscription.user_id == current_user.id
+            ).first()
+            
+            if not subscription:
+                # Check if user has purchased it
+                purchase = db.query(StrategyPurchase).filter(
+                    StrategyPurchase.user_id == current_user.id,
+                    StrategyPurchase.webhook_id == webhook.id,
+                    StrategyPurchase.status == PurchaseStatus.COMPLETED
+                ).first()
+                
+                if not purchase:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You must be subscribed or have purchased this strategy to rate it"
+                    )
+            
+            # Handle webhook rating
+            existing_rating = db.query(WebhookRating).filter(
+                WebhookRating.webhook_id == webhook.id,
+                WebhookRating.user_id == current_user.id
+            ).first()
+            
+            if existing_rating:
+                existing_rating.rating = rating
+                existing_rating.rated_at = datetime.utcnow()
+            else:
+                new_rating = WebhookRating(
+                    webhook_id=webhook.id,
+                    user_id=current_user.id,
+                    rating=rating
+                )
+                db.add(new_rating)
+            
+            # Update average rating
+            all_ratings = db.query(WebhookRating).filter(
+                WebhookRating.webhook_id == webhook.id
+            ).all()
+            
+            if all_ratings:
+                total_ratings = len(all_ratings)
+                rating_sum = sum(r.rating for r in all_ratings)
+                avg_rating = rating_sum / total_ratings if total_ratings > 0 else 0
+                
+                webhook.rating = avg_rating
+                webhook.total_ratings = total_ratings
+        
+        db.commit()
+        
+        return {
+            "status": "success",
+            "message": "Rating updated successfully",
+            "strategy_type": "engine" if is_engine_strategy else "webhook",
+            "new_rating": avg_rating if 'avg_rating' in locals() else rating,
+            "total_ratings": total_ratings if 'total_ratings' in locals() else 1
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error rating strategy: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to rate strategy: {str(e)}"
+        )

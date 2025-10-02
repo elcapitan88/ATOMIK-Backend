@@ -1028,7 +1028,6 @@ async def rate_strategy(
 
     """Rate a strategy"""
     try:
-        rating = rating_data.rating
         # Get the webhook
         webhook = db.query(Webhook).filter(
             Webhook.token == token,
