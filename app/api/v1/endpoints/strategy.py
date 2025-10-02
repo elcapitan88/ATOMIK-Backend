@@ -652,10 +652,9 @@ async def get_user_activated_strategies(
             # Enrich with webhook data if it's a webhook strategy
             if strategy.webhook_id and strategy.execution_type == "webhook":
                 try:
-                    # Parse webhook_id for database lookup
-                    webhook_id = int(strategy.webhook_id) if isinstance(strategy.webhook_id, str) else strategy.webhook_id
-                    webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
-                    
+                    # Look up webhook by token (webhook_id is actually the token string)
+                    webhook = db.query(Webhook).filter(Webhook.token == str(strategy.webhook_id)).first()
+
                     if webhook:
                         strategy_data.update({
                             "name": webhook.name,
@@ -667,12 +666,12 @@ async def get_user_activated_strategies(
                             "subscriber_count": webhook.subscriber_count or 0
                         })
                     else:
-                        logger.warning(f"Webhook {webhook_id} not found for activated strategy {strategy.id}")
-                        strategy_data["name"] = f"Webhook Strategy (ID: {webhook_id})"
-                        
-                except (ValueError, TypeError) as e:
-                    logger.error(f"Invalid webhook_id '{strategy.webhook_id}' for strategy {strategy.id}: {e}")
-                    strategy_data["name"] = f"Invalid Webhook ({strategy.webhook_id})"
+                        logger.warning(f"Webhook token '{strategy.webhook_id}' not found for activated strategy {strategy.id}")
+                        strategy_data["name"] = f"Webhook Strategy (Token: {strategy.webhook_id[:8]}...)" if len(str(strategy.webhook_id)) > 8 else f"Webhook Strategy ({strategy.webhook_id})"
+
+                except Exception as e:
+                    logger.error(f"Error looking up webhook with token '{strategy.webhook_id}' for strategy {strategy.id}: {e}")
+                    strategy_data["name"] = "Unknown Webhook Strategy"
             
             # Enrich with strategy code data if it's an engine strategy
             elif strategy.strategy_code_id and strategy.execution_type == "engine":
