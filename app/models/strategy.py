@@ -90,6 +90,11 @@ class ActivatedStrategy(Base):
     partial_exits_count = Column(Integer, default=0)  # Number of partial exits executed
     last_position_update = Column(DateTime, nullable=True)  # When position was last updated
 
+    # Strategy Scheduling
+    market_schedule = Column(String(50), nullable=True)  # 'NYSE', 'LONDON', 'ASIA', '24/7', None
+    schedule_active_state = Column(Boolean, nullable=True)  # Track if currently scheduled on/off
+    last_scheduled_toggle = Column(DateTime, nullable=True)  # Last time scheduler toggled this strategy
+
     # Relationships
     user = relationship("User", back_populates="strategies")
     webhook = relationship(

@@ -186,6 +186,7 @@ class SingleStrategyCreate(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=10)
     account_id: str = Field(..., description="Trading account identifier")
     quantity: int = Field(..., gt=0, description="Trading quantity")
+    market_schedule: Optional[str] = Field(None, description="Market hours schedule (NYSE, LONDON, ASIA, 24/7)")
 
     @validator('strategy_code_id')
     def validate_strategy_source(cls, v, values):
@@ -224,6 +225,7 @@ class MultipleStrategyCreate(BaseModel):
     follower_account_ids: List[str] = Field(..., min_items=1)
     follower_quantities: List[int] = Field(..., min_items=1)
     group_name: str = Field(..., min_length=1, max_length=100)
+    market_schedule: Optional[str] = Field(None, description="Market hours schedule (NYSE, LONDON, ASIA, 24/7)")
 
     @validator('strategy_code_id')
     def validate_strategy_source(cls, v, values):
@@ -342,7 +344,12 @@ class StrategyResponse(BaseModel):
         "account_id": "TV67890",
         "quantity": 1
     }])
-    
+
+    # Scheduling fields
+    market_schedule: Optional[str] = Field(None, description="Market hours schedule")
+    schedule_active_state: Optional[bool] = Field(None, description="Current schedule state")
+    last_scheduled_toggle: Optional[datetime] = Field(None, description="Last automated toggle")
+
     @validator('webhook_id')
     def validate_webhook_id(cls, v):
         if not v:
