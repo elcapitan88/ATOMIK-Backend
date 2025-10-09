@@ -7,7 +7,7 @@ from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from app.db.session import get_db
+from app.db.session import SessionLocal
 from app.models.strategy import ActivatedStrategy
 from app.core.market_hours import is_market_open
 
@@ -19,7 +19,7 @@ async def check_strategy_schedules():
     Check all strategies with market schedules and toggle as needed.
     This function is called every minute by the scheduler.
     """
-    db = next(get_db())
+    db = SessionLocal()
 
     try:
         # Get all strategies with market schedules
