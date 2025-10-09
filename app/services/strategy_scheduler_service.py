@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 async def check_strategy_schedules():
     """
     Check all strategies with market schedules and toggle as needed.
+    Strategy is ON if ANY selected market is open.
     This function is called every minute by the scheduler.
     """
     db = SessionLocal()
@@ -24,10 +25,7 @@ async def check_strategy_schedules():
     try:
         # Get all strategies with market schedules
         scheduled_strategies = db.query(ActivatedStrategy).filter(
-            and_(
-                ActivatedStrategy.market_schedule.isnot(None),
-                ActivatedStrategy.market_schedule != '24/7'
-            )
+            ActivatedStrategy.market_schedule.isnot(None)
         ).all()
 
         if not scheduled_strategies:
@@ -39,25 +37,45 @@ async def check_strategy_schedules():
 
         for strategy in scheduled_strategies:
             try:
-                market_open = is_market_open(strategy.market_schedule)
+                markets = strategy.market_schedule
+
+                # Skip if no markets or null
+                if not markets:
+                    continue
+
+                # Handle JSON array of markets
+                if isinstance(markets, list):
+                    # Check if 24/7 is in the list
+                    if '24/7' in markets:
+                        continue  # Always on, no scheduling needed
+
+                    # Check if ANY market is open
+                    any_market_open = any(is_market_open(market) for market in markets)
+                else:
+                    # Backward compatibility: single string value
+                    if markets == '24/7':
+                        continue
+                    any_market_open = is_market_open(markets)
 
                 # Determine if we need to toggle
                 should_toggle = False
                 new_state = None
 
-                if market_open and not strategy.is_active:
-                    # Market is open but strategy is off - turn it on
+                if any_market_open and not strategy.is_active:
+                    # At least one market is open but strategy is off - turn it on
                     should_toggle = True
                     new_state = True
-                    logger.info(f"Activating strategy {strategy.id} for {strategy.market_schedule} market open")
+                    markets_str = ', '.join(markets) if isinstance(markets, list) else markets
+                    logger.info(f"Activating strategy {strategy.id} - market(s) open: {markets_str}")
 
-                elif not market_open and strategy.is_active:
-                    # Market is closed but strategy is on - turn it off
+                elif not any_market_open and strategy.is_active:
+                    # All markets are closed but strategy is on - turn it off
                     # Only if it was previously toggled by scheduler or is newly scheduled
                     if strategy.schedule_active_state is not False:
                         should_toggle = True
                         new_state = False
-                        logger.info(f"Deactivating strategy {strategy.id} for {strategy.market_schedule} market close")
+                        markets_str = ', '.join(markets) if isinstance(markets, list) else markets
+                        logger.info(f"Deactivating strategy {strategy.id} - all markets closed: {markets_str}")
 
                 if should_toggle:
                     # Update strategy state
@@ -68,9 +86,10 @@ async def check_strategy_schedules():
 
                     # Log the scheduled action
                     action = "activated" if new_state else "deactivated"
+                    markets_str = ', '.join(markets) if isinstance(markets, list) else markets
                     logger.info(
                         f"Strategy {strategy.id} {action} by scheduler "
-                        f"(market: {strategy.market_schedule}, user: {strategy.user_id})"
+                        f"(markets: {markets_str}, user: {strategy.user_id})"
                     )
 
             except Exception as e:

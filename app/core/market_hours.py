@@ -20,19 +20,19 @@ MARKET_CONFIGS = {
     },
     'LONDON': {
         'timezone': 'Europe/London',
-        'open_time': time(8, 0),    # 8:00 AM
-        'close_time': time(16, 30), # 4:30 PM
+        'open_time': time(8, 0),    # 8:00 AM GMT
+        'close_time': time(16, 30), # 4:30 PM GMT
         'trading_days': [0, 1, 2, 3, 4],
         'name': 'London Stock Exchange',
-        'display_hours': '8:00 AM - 4:30 PM GMT'
+        'display_hours': '3:00 AM - 11:30 AM EST'  # Converted to EST
     },
     'ASIA': {
         'timezone': 'Asia/Tokyo',
-        'open_time': time(9, 0),    # 9:00 AM
-        'close_time': time(15, 0),  # 3:00 PM
+        'open_time': time(9, 0),    # 9:00 AM JST
+        'close_time': time(15, 0),  # 3:00 PM JST
         'trading_days': [0, 1, 2, 3, 4],
         'name': 'Tokyo Stock Exchange',
-        'display_hours': '9:00 AM - 3:00 PM JST'
+        'display_hours': '7:00 PM - 1:00 AM EST'  # Converted to EST (previous day)
     }
 }
 

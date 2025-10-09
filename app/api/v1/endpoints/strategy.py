@@ -258,9 +258,10 @@ async def activate_strategy(
                 # Handle market schedule if provided
                 if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
                     db_strategy.market_schedule = strategy.market_schedule
-                    # Set initial schedule state based on market
-                    if strategy.market_schedule != '24/7':
-                        db_strategy.schedule_active_state = is_market_open(strategy.market_schedule)
+                    # Set initial schedule state - ON if ANY market is open
+                    if '24/7' not in strategy.market_schedule:
+                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
+                        db_strategy.schedule_active_state = any_market_open
                     else:
                         db_strategy.schedule_active_state = None
                 
@@ -382,9 +383,10 @@ async def activate_strategy(
                 # Handle market schedule if provided
                 if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
                     db_strategy.market_schedule = strategy.market_schedule
-                    # Set initial schedule state based on market
-                    if strategy.market_schedule != '24/7':
-                        db_strategy.schedule_active_state = is_market_open(strategy.market_schedule)
+                    # Set initial schedule state - ON if ANY market is open
+                    if '24/7' not in strategy.market_schedule:
+                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
+                        db_strategy.schedule_active_state = any_market_open
                     else:
                         db_strategy.schedule_active_state = None
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Numeric, Table, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Numeric, Table, UniqueConstraint, JSON
 from sqlalchemy.orm import relationship, attribute_mapped_collection, backref
 from datetime import datetime
 import uuid
@@ -91,7 +91,7 @@ class ActivatedStrategy(Base):
     last_position_update = Column(DateTime, nullable=True)  # When position was last updated
 
     # Strategy Scheduling
-    market_schedule = Column(String(50), nullable=True)  # 'NYSE', 'LONDON', 'ASIA', '24/7', None
+    market_schedule = Column(JSON, nullable=True)  # Array of markets: ['NYSE', 'LONDON', 'ASIA'] or ['24/7']
     schedule_active_state = Column(Boolean, nullable=True)  # Track if currently scheduled on/off
     last_scheduled_toggle = Column(DateTime, nullable=True)  # Last time scheduler toggled this strategy
 
