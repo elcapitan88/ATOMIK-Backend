@@ -27,44 +27,33 @@ class CreatorAnalyticsService:
         stripe.api_key = settings.STRIPE_SECRET_KEY
     
     async def get_creator_dashboard(
-        self, 
-        creator_id: int, 
+        self,
+        creator_id: int,
         period: str = "30d"
     ) -> Dict[str, Any]:
         """Get comprehensive creator dashboard data"""
-        
-        # Check cache first
-        cache_key = f"dashboard_{period}"
-        cached_data = await self._get_cached_data(creator_id, cache_key)
-        if cached_data:
-            return cached_data
-        
+
         # Get creator's Stripe account
         creator_profile = self.db.query(CreatorProfile).filter(
             CreatorProfile.user_id == creator_id
         ).first()
-        
-        if not creator_profile or not creator_profile.stripe_connect_id:
+
+        if not creator_profile or not creator_profile.stripe_connect_account_id:
             return self._empty_dashboard()
-        
-        # Fetch data in parallel
-        revenue_data = await self._get_revenue_data(creator_profile.stripe_connect_id, period)
-        subscriber_data = await self._get_subscriber_data(creator_profile.stripe_connect_id)
-        strategy_metrics = await self._get_strategy_metrics(creator_id, period)
-        payout_data = await self._get_payout_data(creator_profile.stripe_connect_id, period)
-        
+
+        # Fetch data from Stripe
+        revenue_data = await self._get_revenue_data(creator_profile.stripe_connect_account_id, period)
+        subscriber_data = await self._get_subscriber_data(creator_profile.stripe_connect_account_id)
+        payout_data = await self._get_payout_data(creator_profile.stripe_connect_account_id, period)
+
         dashboard_data = {
             "revenue": revenue_data,
             "subscribers": subscriber_data,
-            "metrics": strategy_metrics,
             "payouts": payout_data,
             "period": period,
             "generated_at": datetime.utcnow().isoformat()
         }
-        
-        # Cache for 1 hour
-        await self._cache_data(creator_id, cache_key, dashboard_data, hours=1)
-        
+
         return dashboard_data
     
     async def _get_revenue_data(
@@ -210,82 +199,6 @@ class CreatorAnalyticsService:
             logger.error(f"Error fetching subscriber data: {str(e)}")
             return self._empty_subscriber_data()
     
-    async def _get_strategy_metrics(
-        self, 
-        creator_id: int, 
-        period: str
-    ) -> Dict[str, Any]:
-        """Get strategy performance metrics from local database"""
-        # Get creator's strategies
-        strategies = self.db.query(Webhook).filter(
-            Webhook.user_id == creator_id
-        ).all()
-        
-        if not strategies:
-            return self._empty_metrics_data()
-        
-        # Calculate date range
-        end_date = date.today()
-        if period == "7d":
-            start_date = end_date - timedelta(days=7)
-        elif period == "30d":
-            start_date = end_date - timedelta(days=30)
-        elif period == "90d":
-            start_date = end_date - timedelta(days=90)
-        else:  # yearly
-            start_date = end_date - timedelta(days=365)
-        
-        # Aggregate metrics
-        total_views = 0
-        total_unique_viewers = 0
-        total_trial_starts = 0
-        strategy_performance = []
-        
-        for strategy in strategies:
-            metrics = self.db.query(
-                func.sum(StrategyMetrics.views).label('total_views'),
-                func.sum(StrategyMetrics.unique_viewers).label('unique_viewers'),
-                func.sum(StrategyMetrics.trial_starts).label('trial_starts'),
-                func.avg(StrategyMetrics.avg_view_duration).label('avg_duration')
-            ).filter(
-                StrategyMetrics.strategy_id == strategy.id,
-                StrategyMetrics.date >= start_date,
-                StrategyMetrics.date <= end_date
-            ).first()
-            
-            if metrics and metrics.total_views:
-                total_views += metrics.total_views or 0
-                total_unique_viewers += metrics.unique_viewers or 0
-                total_trial_starts += metrics.trial_starts or 0
-                
-                conversion_rate = 0
-                if metrics.unique_viewers > 0:
-                    conversion_rate = (metrics.trial_starts / metrics.unique_viewers) * 100
-                
-                strategy_performance.append({
-                    "strategy_id": str(strategy.id),
-                    "strategy_name": strategy.name,
-                    "views": metrics.total_views or 0,
-                    "unique_viewers": metrics.unique_viewers or 0,
-                    "trial_starts": metrics.trial_starts or 0,
-                    "conversion_rate": round(conversion_rate, 2),
-                    "avg_view_duration": round(metrics.avg_duration or 0, 1)
-                })
-        
-        # Sort by views
-        strategy_performance.sort(key=lambda x: x["views"], reverse=True)
-        
-        return {
-            "total_views": total_views,
-            "total_unique_viewers": total_unique_viewers,
-            "total_trial_starts": total_trial_starts,
-            "overall_conversion_rate": round(
-                (total_trial_starts / total_unique_viewers * 100) if total_unique_viewers > 0 else 0, 
-                2
-            ),
-            "top_strategies": strategy_performance[:5],  # Top 5 strategies
-            "strategy_count": len(strategies)
-        }
     
     async def _get_payout_data(
         self, 
@@ -333,94 +246,12 @@ class CreatorAnalyticsService:
             logger.error(f"Error fetching payout data: {str(e)}")
             return self._empty_payout_data()
     
-    async def _get_cached_data(
-        self, 
-        creator_id: int, 
-        cache_key: str
-    ) -> Optional[Dict[str, Any]]:
-        """Get cached dashboard data"""
-        cache_entry = self.db.query(CreatorDashboardCache).filter(
-            CreatorDashboardCache.creator_id == creator_id,
-            CreatorDashboardCache.cache_key == cache_key,
-            CreatorDashboardCache.expires_at > datetime.utcnow()
-        ).first()
-        
-        if cache_entry:
-            return cache_entry.cache_value
-        return None
-    
-    async def _cache_data(
-        self, 
-        creator_id: int, 
-        cache_key: str, 
-        data: Dict[str, Any], 
-        hours: int = 1
-    ):
-        """Cache dashboard data"""
-        expires_at = datetime.utcnow() + timedelta(hours=hours)
-        
-        # Check if cache entry exists
-        cache_entry = self.db.query(CreatorDashboardCache).filter(
-            CreatorDashboardCache.creator_id == creator_id,
-            CreatorDashboardCache.cache_key == cache_key
-        ).first()
-        
-        if cache_entry:
-            cache_entry.cache_value = data
-            cache_entry.expires_at = expires_at
-            cache_entry.updated_at = datetime.utcnow()
-        else:
-            cache_entry = CreatorDashboardCache(
-                creator_id=creator_id,
-                cache_key=cache_key,
-                cache_value=data,
-                expires_at=expires_at
-            )
-            self.db.add(cache_entry)
-        
-        self.db.commit()
-    
-    async def track_strategy_view(
-        self, 
-        strategy_id: str, 
-        viewer_id: Optional[int] = None,
-        duration: Optional[float] = None
-    ):
-        """Track a strategy view"""
-        today = date.today()
-        
-        # Get or create today's metrics
-        metrics = self.db.query(StrategyMetrics).filter(
-            StrategyMetrics.strategy_id == strategy_id,
-            StrategyMetrics.date == today
-        ).first()
-        
-        if not metrics:
-            metrics = StrategyMetrics(
-                strategy_id=strategy_id,
-                date=today
-            )
-            self.db.add(metrics)
-        
-        # Update metrics
-        metrics.views += 1
-        if viewer_id:
-            # In production, use Redis or similar to track unique viewers
-            metrics.unique_viewers += 1
-        
-        if duration:
-            # Update average duration
-            total_duration = metrics.avg_view_duration * (metrics.views - 1)
-            metrics.avg_view_duration = (total_duration + duration) / metrics.views
-        
-        self.db.commit()
     
     def _empty_dashboard(self) -> Dict[str, Any]:
         """Return empty dashboard structure"""
         return {
             "revenue": self._empty_revenue_data(),
             "subscribers": self._empty_subscriber_data(),
-            "metrics": self._empty_metrics_data(),
             "payouts": self._empty_payout_data(),
             "period": "30d",
             "generated_at": datetime.utcnow().isoformat()
@@ -453,16 +284,6 @@ class CreatorAnalyticsService:
             },
             "mrr": 0,
             "arr": 0
-        }
-    
-    def _empty_metrics_data(self) -> Dict[str, Any]:
-        return {
-            "total_views": 0,
-            "total_unique_viewers": 0,
-            "total_trial_starts": 0,
-            "overall_conversion_rate": 0,
-            "top_strategies": [],
-            "strategy_count": 0
         }
     
     def _empty_payout_data(self) -> Dict[str, Any]:

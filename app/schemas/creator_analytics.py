@@ -73,7 +73,6 @@ class PayoutResponse(BaseModel):
 class DashboardResponse(BaseModel):
     revenue: RevenueResponse
     subscribers: SubscriberResponse
-    metrics: MetricsResponse
     payouts: PayoutResponse
     period: str
     generated_at: str
