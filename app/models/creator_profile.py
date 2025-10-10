@@ -23,6 +23,7 @@ class CreatorProfile(Base):
     
     # Creator metrics
     total_subscribers = Column(Integer, default=0, nullable=False)
+    follower_count = Column(Integer, default=0, nullable=False)  # Social followers (different from subscribers)
     current_tier = Column(String(20), default="bronze", nullable=False, index=True)  # bronze, silver, gold
     platform_fee_override = Column(Numeric(precision=3, scale=2))  # Admin override for platform fee
     

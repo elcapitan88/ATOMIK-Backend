@@ -295,6 +295,17 @@ async def update_profile(
 ):
     """Update user profile information"""
     try:
+        # Enhanced debug logging at the very start
+        logger.info(f"🔥 PROFILE UPDATE REQUEST RECEIVED - User ID: {current_user.id}, Email: {current_user.email}")
+        logger.info(f"🔥 Raw profile_data received: {profile_data}")
+        logger.info(f"🔥 Profile data keys: {list(profile_data.keys()) if profile_data else 'None'}")
+        logger.info(f"🔥 Profile data type: {type(profile_data)}")
+
+        # Specifically log social media data if present
+        if "socialMedia" in profile_data:
+            logger.info(f"🔥 SocialMedia data found: {profile_data['socialMedia']}")
+        else:
+            logger.info(f"🔥 No socialMedia key found in profile_data")
         # Update allowed fields only
         allowed_fields = ["full_name", "phone", "username", "email", "profile_picture"]
         update_data = {}
@@ -304,42 +315,71 @@ async def update_profile(
                 update_data[field] = profile_data[field]
         
         # Handle nested fields like socialMedia
+        social_media_updated = False
+        logger.info(f"🔥 Checking for socialMedia key in profile_data...")
         if "socialMedia" in profile_data and isinstance(profile_data["socialMedia"], dict):
             social_data = profile_data["socialMedia"]
+            logger.info(f"🔥 Processing social media data: {social_data}")
+
             # Map frontend social media fields to backend columns
             if "twitter" in social_data:  # Frontend still uses "twitter" key
+                logger.info(f"🔥 Setting x_handle to: {social_data['twitter']}")
                 current_user.x_handle = social_data["twitter"]
+                social_media_updated = True
             if "tiktok" in social_data:
+                logger.info(f"🔥 Setting tiktok_handle to: {social_data['tiktok']}")
                 current_user.tiktok_handle = social_data["tiktok"]
+                social_media_updated = True
             if "instagram" in social_data:
+                logger.info(f"🔥 Setting instagram_handle to: {social_data['instagram']}")
                 current_user.instagram_handle = social_data["instagram"]
+                social_media_updated = True
             if "youtube" in social_data:
+                logger.info(f"🔥 Setting youtube_handle to: {social_data['youtube']}")
                 current_user.youtube_handle = social_data["youtube"]
+                social_media_updated = True
             if "discord" in social_data:
+                logger.info(f"🔥 Setting discord_handle to: {social_data['discord']}")
                 current_user.discord_handle = social_data["discord"]
-            
+                social_media_updated = True
+
+            logger.info(f"🔥 Social media updated flag: {social_media_updated}")
+        else:
+            logger.info(f"🔥 No valid socialMedia data found in profile_data")
+
         # Handle preferences
         if "preferences" in profile_data and isinstance(profile_data["preferences"], dict):
             # Serialize preferences as JSON or create separate columns as needed
             pass
-            
-        if update_data:
+
+        logger.info(f"🔥 About to check commit conditions: update_data={update_data}, social_media_updated={social_media_updated}")
+
+        if update_data or social_media_updated:
+            logger.info(f"🔥 COMMITTING CHANGES - update_data: {update_data}, social_media_updated: {social_media_updated}")
+
             # Update user record
             for key, value in update_data.items():
+                logger.info(f"🔥 Setting {key} to {value}")
                 setattr(current_user, key, value)
-                
+
             # Update modified timestamp
             current_user.updated_at = datetime.utcnow()
-            
+
+            # Show current user social media values before commit
+            logger.info(f"🔥 User social media before commit: x_handle={current_user.x_handle}, tiktok={current_user.tiktok_handle}, instagram={current_user.instagram_handle}, youtube={current_user.youtube_handle}, discord={current_user.discord_handle}")
+
             db.commit()
             db.refresh(current_user)
-            
-            logger.info(f"Profile updated for user ID {current_user.id}")
-            
+
+            # Show current user social media values after commit
+            logger.info(f"🔥 User social media after commit: x_handle={current_user.x_handle}, tiktok={current_user.tiktok_handle}, instagram={current_user.instagram_handle}, youtube={current_user.youtube_handle}, discord={current_user.discord_handle}")
+
+            logger.info(f"🔥 Profile updated successfully for user ID {current_user.id}")
+
             # Return updated user data (excluding sensitive fields)
-            return {
+            response_data = {
                 "id": current_user.id,
-                "username": current_user.username, 
+                "username": current_user.username,
                 "email": current_user.email,
                 "full_name": current_user.full_name,
                 "phone": current_user.phone,
@@ -348,7 +388,22 @@ async def update_profile(
                 "is_active": current_user.is_active,
                 "message": "Profile updated successfully"
             }
+
+            # Include social media data if it was updated
+            if social_media_updated:
+                logger.info(f"🔥 Including social media in response")
+                response_data["socialMedia"] = {
+                    "twitter": current_user.x_handle,
+                    "tiktok": current_user.tiktok_handle,
+                    "instagram": current_user.instagram_handle,
+                    "youtube": current_user.youtube_handle,
+                    "discord": current_user.discord_handle
+                }
+
+            logger.info(f"🔥 Final response data: {response_data}")
+            return response_data
         else:
+            logger.info(f"🔥 RETURNING 'No valid fields to update' - update_data={update_data}, social_media_updated={social_media_updated}")
             return {"message": "No valid fields to update"}
             
     except Exception as e:

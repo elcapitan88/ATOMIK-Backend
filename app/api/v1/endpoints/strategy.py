@@ -35,11 +35,13 @@ from app.schemas.strategy import (
 from app.models.strategy_code import StrategyCode
 from app.utils.ticker_utils import get_display_ticker, validate_ticker
 from app.core.permissions import (
-    check_subscription, 
-    check_resource_limit, 
-    check_feature_access, 
+    check_subscription,
+    check_resource_limit,
+    check_feature_access,
     require_tier
 )
+from app.core.market_hours import is_market_open, get_market_info, get_next_market_event
+from app.services.strategy_scheduler_service import override_scheduled_state
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -252,6 +254,16 @@ async def activate_strategy(
                     quantity=strategy.quantity,
                     is_active=True
                 )
+
+                # Handle market schedule if provided
+                if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
+                    db_strategy.market_schedule = strategy.market_schedule
+                    # Set initial schedule state - ON if ANY market is open
+                    if '24/7' not in strategy.market_schedule:
+                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
+                        db_strategy.schedule_active_state = any_market_open
+                    else:
+                        db_strategy.schedule_active_state = None
                 
                 db.add(db_strategy)
                 db.flush()
@@ -367,6 +379,16 @@ async def activate_strategy(
                     group_name=strategy.group_name,
                     is_active=True
                 )
+
+                # Handle market schedule if provided
+                if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
+                    db_strategy.market_schedule = strategy.market_schedule
+                    # Set initial schedule state - ON if ANY market is open
+                    if '24/7' not in strategy.market_schedule:
+                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
+                        db_strategy.schedule_active_state = any_market_open
+                    else:
+                        db_strategy.schedule_active_state = None
 
                 db.add(db_strategy)
                 db.flush()
@@ -765,19 +787,24 @@ async def toggle_strategy(
         # Toggle the active status
         old_status = strategy.is_active
         strategy.is_active = not strategy.is_active
-        
+
+        # Handle manual override for scheduled strategies
+        if strategy.market_schedule:
+            await override_scheduled_state(strategy_id, strategy.is_active, db)
+            logger.info(f"Manual override applied to scheduled strategy {strategy_id}")
+
         # Update subscription counter
         subscription = db.query(Subscription).filter(
             Subscription.user_id == current_user.id
         ).first()
-        
+
         if subscription:
             if strategy.is_active and not old_status:  # Being activated
                 subscription.active_strategies_count = (subscription.active_strategies_count or 0) + 1
             elif not strategy.is_active and old_status:  # Being deactivated
                 if subscription.active_strategies_count > 0:
                     subscription.active_strategies_count -= 1
-        
+
         db.commit()
         db.refresh(strategy)
         
@@ -1491,3 +1518,111 @@ async def delete_engine_strategy(
             status_code=500,
             detail=f"Failed to delete strategy: {str(e)}"
         )
+
+
+# ==================== STRATEGY SCHEDULING ENDPOINTS ====================
+
+@router.get("/{strategy_id}/schedule")
+async def get_strategy_schedule(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Get schedule information for a strategy"""
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    if not strategy.market_schedule:
+        return {
+            "scheduled": False,
+            "market": None
+        }
+
+    market_info = get_market_info(strategy.market_schedule)
+    next_event = get_next_market_event(strategy.market_schedule)
+
+    return {
+        "scheduled": True,
+        "market": strategy.market_schedule,
+        "market_info": market_info,
+        "next_event": next_event,
+        "last_scheduled_toggle": strategy.last_scheduled_toggle,
+        "manual_override": strategy.schedule_active_state is None
+    }
+
+
+@router.put("/{strategy_id}/schedule")
+async def update_strategy_schedule(
+    strategy_id: int,
+    schedule_data: dict,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Update schedule settings for a strategy"""
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    market_schedule = schedule_data.get('market_schedule')
+
+    # Validate market schedule
+    valid_markets = ['NYSE', 'LONDON', 'ASIA', '24/7', None]
+    if market_schedule not in valid_markets:
+        raise HTTPException(status_code=400, detail="Invalid market schedule")
+
+    strategy.market_schedule = market_schedule
+
+    # Reset schedule state when schedule changes
+    if market_schedule and market_schedule != '24/7':
+        strategy.schedule_active_state = is_market_open(market_schedule)
+    else:
+        strategy.schedule_active_state = None
+
+    db.commit()
+    db.refresh(strategy)
+
+    logger.info(f"Strategy {strategy_id} schedule updated to {market_schedule}")
+
+    return {
+        "message": "Schedule updated successfully",
+        "market_schedule": market_schedule,
+        "schedule_active_state": strategy.schedule_active_state
+    }
+
+
+@router.delete("/{strategy_id}/schedule")
+async def remove_strategy_schedule(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Remove scheduling from a strategy (make it always-on)"""
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    strategy.market_schedule = None
+    strategy.schedule_active_state = None
+    strategy.last_scheduled_toggle = None
+
+    db.commit()
+
+    logger.info(f"Strategy {strategy_id} schedule removed, now always-on")
+
+    return {
+        "message": "Schedule removed successfully",
+        "market_schedule": None
+    }

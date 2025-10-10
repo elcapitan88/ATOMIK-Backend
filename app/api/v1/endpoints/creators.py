@@ -596,22 +596,51 @@ async def get_stripe_status(
         
         # Check if onboarding is truly complete
         # Stripe onboarding is complete when:
-        # 1. Details are submitted 
+        # 1. Details are submitted
         # 2. No currently_due requirements (including TOS)
         # 3. Payouts are enabled (final indicator)
         onboarding_complete = (
-            account.details_submitted and 
+            account.details_submitted and
             len(account.requirements.currently_due) == 0 and
             account.payouts_enabled
         )
-        
+
         # If charges are enabled but payouts aren't, it might just be processing
         if account.charges_enabled and not account.payouts_enabled:
             # Check if only TOS is missing
             currently_due = account.requirements.currently_due
             if all(req.startswith('tos_acceptance') for req in currently_due):
                 onboarding_complete = True  # Consider it complete if only TOS is pending
-        
+
+        # ✨ AUTO-CREATE WEBHOOK when onboarding completes (PHASE 3)
+        # If onboarding just completed and webhook doesn't exist yet, create it automatically
+        if onboarding_complete and account.charges_enabled and not creator_profile.stripe_webhook_id:
+            try:
+                logger.info(f"Auto-creating webhook for creator {creator_profile.id} (account: {creator_profile.stripe_connect_account_id})")
+
+                from app.services.stripe_connect_service import StripeConnectService
+                stripe_service = StripeConnectService()
+
+                webhook_info = await stripe_service.create_connected_account_webhook(
+                    connected_account_id=creator_profile.stripe_connect_account_id,
+                    webhook_url=f"{settings.SERVER_HOST}/api/v1/marketplace/webhook"
+                )
+
+                # Store webhook credentials in database
+                from datetime import datetime
+                creator_profile.stripe_webhook_id = webhook_info['webhook_id']
+                creator_profile.stripe_webhook_secret = webhook_info['webhook_secret']
+                creator_profile.webhook_created_at = datetime.utcnow()
+
+                db.commit()
+
+                logger.info(f"✅ Webhook {webhook_info['webhook_id']} created successfully for creator {creator_profile.id}")
+
+            except Exception as webhook_error:
+                logger.error(f"❌ Failed to create webhook for creator {creator_profile.id}: {webhook_error}")
+                # Don't fail the status check - we can retry webhook creation later
+                # Just log the error for monitoring
+
         return {
             "connected": True,
             "onboarding_complete": onboarding_complete,
@@ -620,7 +649,8 @@ async def get_stripe_status(
             "payouts_enabled": account.payouts_enabled,
             "details_submitted": account.details_submitted,
             "requirements": account.requirements,
-            "tos_accepted": account.tos_acceptance.date is not None
+            "tos_accepted": account.tos_acceptance.date is not None,
+            "webhook_configured": creator_profile.stripe_webhook_id is not None  # NEW: indicate if webhook is set up
         }
         
     except Exception as e:
