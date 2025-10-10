@@ -146,7 +146,59 @@ class StripeConnectService:
         except Exception as e:
             logger.error(f"Error creating account link: {str(e)}")
             raise
-    
+
+    async def create_connected_account_webhook(
+        self,
+        connected_account_id: str,
+        webhook_url: str
+    ) -> Dict[str, str]:
+        """
+        Automatically create a webhook endpoint on a connected account.
+        This is called automatically after a creator completes Stripe onboarding.
+        The creator doesn't need to do anything - it's completely automatic!
+
+        Args:
+            connected_account_id: The creator's Stripe Connect account ID
+            webhook_url: Your platform's webhook URL (e.g., https://api.atomiktrading.io/api/v1/marketplace/webhook)
+
+        Returns:
+            Dict with 'webhook_id' and 'webhook_secret'
+        """
+        try:
+            # Events we need to track for strategy purchases
+            enabled_events = [
+                'checkout.session.completed',      # When purchase completes
+                'payment_intent.succeeded',         # Backup for one-time payments
+                'invoice.payment_succeeded',        # For subscription renewals
+                'customer.subscription.deleted',    # When subscription cancelled
+                'customer.subscription.updated',    # Subscription changes
+                'charge.refunded',                  # Refund tracking
+            ]
+
+            # Create webhook endpoint on the CONNECTED account (not platform)
+            # This is done via YOUR API key, using the stripe_account parameter
+            webhook_endpoint = stripe.WebhookEndpoint.create(
+                url=webhook_url,
+                enabled_events=enabled_events,
+                description="Atomik Trading - Strategy Purchase Events",
+                api_version="2024-11-20.acacia",  # Lock API version for consistency
+                stripe_account=connected_account_id  # THIS creates it on the creator's account!
+            )
+
+            logger.info(f"Auto-created webhook {webhook_endpoint.id} on connected account {connected_account_id}")
+
+            return {
+                'webhook_id': webhook_endpoint.id,
+                'webhook_secret': webhook_endpoint.secret  # This is the signing secret
+            }
+
+        except stripe.error.StripeError as e:
+            logger.error(f"Failed to create webhook on connected account {connected_account_id}: {str(e)}")
+            raise Exception(f"Failed to create webhook: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error creating webhook: {str(e)}")
+            raise
+
     async def create_payment_with_app_fee(
         self,
         amount: Decimal,

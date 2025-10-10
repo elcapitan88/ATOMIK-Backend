@@ -881,57 +881,84 @@ async def handle_strategy_webhook(
     db: Session = Depends(get_db)
 ):
     """
-    Handle Stripe webhooks for strategy purchases.
-    Similar to the main subscription webhook handler.
+    Handle Stripe webhooks from connected accounts (creator Stripe accounts).
+    Each creator has their own webhook secret - we look it up based on the account ID.
+
+    This endpoint is called automatically by Stripe - creators don't trigger this manually.
     """
     try:
-        # Get the webhook signature from headers
         sig_header = request.headers.get('stripe-signature')
         if not sig_header:
-            logger.error("No Stripe signature found in strategy webhook request")
-            return {"status": "error", "message": "No signature header"}
+            logger.error("No Stripe signature found in webhook request")
+            return {"status": "error", "message": "No signature"}
 
-        # Get the raw request body
         payload = await request.body()
-        
-        # Verify webhook signature using Stripe Connect
+
+        # STEP 1: Parse the event (without verification) to get the account ID
+        import json
+        try:
+            event_dict = json.loads(payload)
+            account_id = event_dict.get('account')  # This tells us which creator's account sent this
+
+            if not account_id:
+                logger.warning("⚠️ No account ID in webhook - might be platform account event")
+                # Fall back to platform webhook secret for backwards compatibility
+                webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+                creator_id = None
+            else:
+                # STEP 2: Look up the creator's webhook secret based on their connected account ID
+                from app.models.creator_profile import CreatorProfile
+                creator_profile = db.query(CreatorProfile).filter(
+                    CreatorProfile.stripe_connect_account_id == account_id
+                ).first()
+
+                if not creator_profile:
+                    logger.error(f"❌ Unknown connected account: {account_id}")
+                    return {"status": "error", "message": "Unknown account"}
+
+                if not creator_profile.stripe_webhook_secret:
+                    logger.error(f"❌ No webhook secret for creator {creator_profile.id} (account: {account_id})")
+                    return {"status": "error", "message": "No webhook secret configured"}
+
+                webhook_secret = creator_profile.stripe_webhook_secret
+                creator_id = creator_profile.id
+                logger.info(f"📥 Webhook from creator {creator_profile.id} (account: {account_id})")
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse webhook payload: {e}")
+            return {"status": "error", "message": "Invalid payload"}
+
+        # STEP 3: Verify the webhook signature using the correct secret
         try:
             import stripe
-            # Use the webhook endpoint secret for strategy webhooks (if configured)
-            webhook_secret = getattr(settings, 'STRIPE_STRATEGY_WEBHOOK_SECRET', settings.STRIPE_WEBHOOK_SECRET)
             event = stripe.Webhook.construct_event(
                 payload, sig_header, webhook_secret
             )
-        except Exception as e:
-            logger.error(f"Strategy webhook signature verification failed: {str(e)}")
+        except stripe.error.SignatureVerificationError as e:
+            logger.error(f"❌ Webhook signature verification failed: {e}")
             return {"status": "error", "message": "Invalid signature"}
 
-        # Log event for debugging
-        logger.info(f"Processing strategy webhook event: {event['type']}")
-        
-        # Process different event types
+        # STEP 4: Process the event (your existing handlers)
         event_type = event['type']
         event_data = event['data']['object']
 
-        # Handle checkout session completion for strategy purchases
+        logger.info(f"✅ Processing {event_type} from account {account_id if account_id else 'platform'}")
+
         if event_type == "checkout.session.completed":
             await handle_strategy_checkout_completed(db, event_data)
-        
-        # Handle successful payments for one-time strategy purchases
         elif event_type == "payment_intent.succeeded":
             await handle_strategy_payment_succeeded(db, event_data)
-        
-        # Handle subscription events for recurring strategy purchases
         elif event_type == "invoice.payment_succeeded":
             await handle_strategy_subscription_payment(db, event_data)
-        
         elif event_type == "customer.subscription.deleted":
             await handle_strategy_subscription_cancelled(db, event_data)
 
         return {"status": "success"}
 
     except Exception as e:
-        logger.error(f"Strategy webhook processing error: {str(e)}")
+        logger.error(f"❌ Webhook processing error: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {"status": "error", "message": str(e)}
 
 
