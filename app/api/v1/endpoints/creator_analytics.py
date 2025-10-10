@@ -44,7 +44,7 @@ async def get_creator_dashboard(
             detail="User is not a creator"
         )
     
-    if not creator_profile.stripe_connect_id:
+    if not creator_profile.stripe_connect_account_id:
         raise HTTPException(
             status_code=400,
             detail="Creator has not completed Stripe Connect setup"
@@ -70,15 +70,15 @@ async def get_revenue_data(
         CreatorProfile.user_id == current_user.id
     ).first()
     
-    if not creator_profile or not creator_profile.stripe_connect_id:
+    if not creator_profile or not creator_profile.stripe_connect_account_id:
         raise HTTPException(
             status_code=403,
             detail="Creator profile not found or Stripe not connected"
         )
-    
+
     analytics_service = CreatorAnalyticsService(db)
     revenue_data = await analytics_service._get_revenue_data(
-        stripe_account_id=creator_profile.stripe_connect_id,
+        stripe_account_id=creator_profile.stripe_connect_account_id,
         period=period
     )
     
@@ -95,15 +95,15 @@ async def get_subscriber_data(
         CreatorProfile.user_id == current_user.id
     ).first()
     
-    if not creator_profile or not creator_profile.stripe_connect_id:
+    if not creator_profile or not creator_profile.stripe_connect_account_id:
         raise HTTPException(
             status_code=403,
             detail="Creator profile not found or Stripe not connected"
         )
-    
+
     analytics_service = CreatorAnalyticsService(db)
     subscriber_data = await analytics_service._get_subscriber_data(
-        stripe_account_id=creator_profile.stripe_connect_id
+        stripe_account_id=creator_profile.stripe_connect_account_id
     )
     
     return subscriber_data
