@@ -897,11 +897,13 @@ async def handle_strategy_webhook(
 
         payload = await request.body()
 
-        # Verify webhook signature using PLATFORM webhook secret
+        # Verify webhook signature using STRATEGY webhook secret
         try:
             import stripe
+            # Use STRIPE_STRATEGY_WEBHOOK_SECRET for marketplace strategy purchases
+            webhook_secret = getattr(settings, 'STRIPE_STRATEGY_WEBHOOK_SECRET', settings.STRIPE_WEBHOOK_SECRET)
             event = stripe.Webhook.construct_event(
-                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+                payload, sig_header, webhook_secret
             )
         except stripe.error.SignatureVerificationError as e:
             logger.error(f"❌ Webhook signature verification failed: {e}")
