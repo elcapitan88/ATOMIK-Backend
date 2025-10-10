@@ -1344,38 +1344,57 @@ async def get_user_strategy_subscriptions(
                 monetization = db.query(StrategyMonetization).filter(
                     StrategyMonetization.webhook_id == purchase.webhook_id
                 ).first()
-                
+
                 if not webhook or not monetization:
+                    logger.warning(f"Skipping purchase {purchase.id}: webhook or monetization not found")
                     continue
-                
+
                 # Get creator info
                 creator = db.query(User).filter(User.id == monetization.creator_user_id).first()
-                
-                # Get Stripe subscription details
-                subscription_data = await stripe_service.get_subscription(
-                    purchase.stripe_subscription_id
-                )
-                
+
+                # Initialize subscription info with database data
                 subscription_info = {
-                    "id": purchase.id,
+                    "id": str(purchase.id),
                     "stripe_subscription_id": purchase.stripe_subscription_id,
                     "strategy_name": webhook.name,
                     "strategy_id": webhook.id,
                     "creator_name": creator.username if creator else "Unknown",
                     "amount": float(purchase.amount_paid),
-                    "currency": subscription_data.get("currency", "usd"),
-                    "status": subscription_data.get("status"),
-                    "interval": subscription_data.get("items", {}).get("data", [{}])[0].get("price", {}).get("recurring", {}).get("interval"),
-                    "current_period_start": subscription_data.get("current_period_start"),
-                    "current_period_end": subscription_data.get("current_period_end"),
-                    "trial_end": subscription_data.get("trial_end"),
-                    "cancel_at_period_end": subscription_data.get("cancel_at_period_end"),
-                    "created_at": purchase.created_at,
+                    "currency": "usd",  # Default currency
+                    "status": purchase.status.lower() if hasattr(purchase, 'status') else "unknown",
+                    "interval": "month",  # Default interval
+                    "current_period_start": None,
+                    "current_period_end": None,
+                    "trial_end": None,
+                    "cancel_at_period_end": False,
+                    "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
                     "purchase_type": purchase.purchase_type
                 }
-                
+
+                # Try to get Stripe subscription details if subscription ID exists
+                if purchase.stripe_subscription_id:
+                    try:
+                        subscription_data = await stripe_service.get_subscription(
+                            purchase.stripe_subscription_id
+                        )
+
+                        # Update with Stripe data if available
+                        subscription_info.update({
+                            "currency": subscription_data.get("currency", "usd"),
+                            "status": subscription_data.get("status", subscription_info["status"]),
+                            "interval": subscription_data.get("items", {}).get("data", [{}])[0].get("price", {}).get("recurring", {}).get("interval", "month"),
+                            "current_period_start": subscription_data.get("current_period_start"),
+                            "current_period_end": subscription_data.get("current_period_end"),
+                            "trial_end": subscription_data.get("trial_end"),
+                            "cancel_at_period_end": subscription_data.get("cancel_at_period_end", False),
+                        })
+                        logger.info(f"Successfully fetched Stripe data for subscription {purchase.stripe_subscription_id}")
+                    except Exception as stripe_error:
+                        # Log Stripe error but continue with database data
+                        logger.warning(f"Could not fetch Stripe data for subscription {purchase.stripe_subscription_id}: {str(stripe_error)}")
+
                 subscriptions.append(subscription_info)
-                
+
             except Exception as e:
                 logger.error(f"Error processing subscription {purchase.id}: {str(e)}")
                 continue
