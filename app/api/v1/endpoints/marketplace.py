@@ -881,10 +881,13 @@ async def handle_strategy_webhook(
     db: Session = Depends(get_db)
 ):
     """
-    Handle Stripe webhooks from connected accounts (creator Stripe accounts).
-    Each creator has their own webhook secret - we look it up based on the account ID.
+    Handle Stripe Connect platform application webhooks for strategy purchases.
 
-    This endpoint is called automatically by Stripe - creators don't trigger this manually.
+    This endpoint receives events from a SINGLE webhook on the platform account that
+    listens to all connected account events (checkout.session.completed, etc).
+
+    The 'account' field in the event tells us which creator's connected account
+    the event came from, but we verify using the PLATFORM webhook secret.
     """
     try:
         sig_header = request.headers.get('stripe-signature')
@@ -894,56 +897,36 @@ async def handle_strategy_webhook(
 
         payload = await request.body()
 
-        # STEP 1: Parse the event (without verification) to get the account ID
-        import json
-        try:
-            event_dict = json.loads(payload)
-            account_id = event_dict.get('account')  # This tells us which creator's account sent this
-
-            if not account_id:
-                logger.warning("⚠️ No account ID in webhook - might be platform account event")
-                # Fall back to platform webhook secret for backwards compatibility
-                webhook_secret = settings.STRIPE_WEBHOOK_SECRET
-                creator_id = None
-            else:
-                # STEP 2: Look up the creator's webhook secret based on their connected account ID
-                from app.models.creator_profile import CreatorProfile
-                creator_profile = db.query(CreatorProfile).filter(
-                    CreatorProfile.stripe_connect_account_id == account_id
-                ).first()
-
-                if not creator_profile:
-                    logger.error(f"❌ Unknown connected account: {account_id}")
-                    return {"status": "error", "message": "Unknown account"}
-
-                if not creator_profile.stripe_webhook_secret:
-                    logger.error(f"❌ No webhook secret for creator {creator_profile.id} (account: {account_id})")
-                    return {"status": "error", "message": "No webhook secret configured"}
-
-                webhook_secret = creator_profile.stripe_webhook_secret
-                creator_id = creator_profile.id
-                logger.info(f"📥 Webhook from creator {creator_profile.id} (account: {account_id})")
-
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Failed to parse webhook payload: {e}")
-            return {"status": "error", "message": "Invalid payload"}
-
-        # STEP 3: Verify the webhook signature using the correct secret
+        # Verify webhook signature using PLATFORM webhook secret
         try:
             import stripe
             event = stripe.Webhook.construct_event(
-                payload, sig_header, webhook_secret
+                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
             )
         except stripe.error.SignatureVerificationError as e:
             logger.error(f"❌ Webhook signature verification failed: {e}")
             return {"status": "error", "message": "Invalid signature"}
 
-        # STEP 4: Process the event (your existing handlers)
+        # Extract event details
         event_type = event['type']
         event_data = event['data']['object']
+        account_id = event.get('account')  # Connected account ID (if from connected account)
 
-        logger.info(f"✅ Processing {event_type} from account {account_id if account_id else 'platform'}")
+        # Log the event
+        if account_id:
+            # This is a Connect event from a connected account
+            from app.models.creator_profile import CreatorProfile
+            creator_profile = db.query(CreatorProfile).filter(
+                CreatorProfile.stripe_connect_account_id == account_id
+            ).first()
 
+            creator_info = f"creator {creator_profile.id}" if creator_profile else f"unknown account {account_id[:12]}..."
+            logger.info(f"📥 Connect webhook: {event_type} from {creator_info}")
+        else:
+            # This is a platform account event
+            logger.info(f"📥 Platform webhook: {event_type}")
+
+        # Process different event types
         if event_type == "checkout.session.completed":
             await handle_strategy_checkout_completed(db, event_data)
         elif event_type == "payment_intent.succeeded":
