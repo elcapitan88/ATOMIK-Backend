@@ -242,15 +242,24 @@ async def login(
                     raise e
 
             if not subscription:
-                logger.warning(f"No subscription found for user {user.email}")
+                logger.warning(f"No subscription found for user {user.email} (user_id: {user.id})")
                 raise HTTPException(
                     status_code=403,
                     detail="No active subscription found"
                 )
 
-            has_active_subscription = await stripe_service.verify_subscription_status(
-                subscription.stripe_customer_id
-            )
+            # Log subscription details for debugging
+            logger.info(f"Subscription found for user {user.email}: tier={subscription.tier}, status={subscription.status}, is_lifetime={subscription.is_lifetime}")
+
+            # Check if user has lifetime access
+            if subscription.is_lifetime:
+                logger.info(f"User {user.email} has lifetime access - skipping Stripe verification")
+                has_active_subscription = True
+            else:
+                # Only verify with Stripe if not lifetime
+                has_active_subscription = await stripe_service.verify_subscription_status(
+                    subscription.stripe_customer_id
+                )
 
             if not has_active_subscription:
                 logger.warning(f"Inactive subscription for user {user.email}")
