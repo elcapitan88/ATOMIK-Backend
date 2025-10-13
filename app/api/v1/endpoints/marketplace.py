@@ -905,7 +905,7 @@ async def handle_strategy_webhook(
             event = stripe.Webhook.construct_event(
                 payload, sig_header, webhook_secret
             )
-        except stripe.error.SignatureVerificationError as e:
+        except stripe.SignatureVerificationError as e:
             logger.error(f"❌ Webhook signature verification failed: {e}")
             return {"status": "error", "message": "Invalid signature"}
 
@@ -1261,7 +1261,7 @@ async def verify_purchase_session(
         try:
             # Try retrieving from main account first
             session = stripe.checkout.Session.retrieve(session_id)
-        except stripe.error.InvalidRequestError as e:
+        except stripe.InvalidRequestError as e:
             # Session might be on a connected account
             # We need to find which connected account to check
             logger.warning(f"Session {session_id} not found on main account, checking connected accounts")
@@ -1281,7 +1281,7 @@ async def verify_purchase_session(
                     creator_profile = profile
                     logger.info(f"Found session {session_id} on connected account {profile.stripe_connect_account_id}")
                     break
-                except stripe.error.InvalidRequestError:
+                except stripe.InvalidRequestError:
                     continue
 
             if not session:
@@ -1345,7 +1345,7 @@ async def verify_purchase_session(
             "amount_paid": float(purchase.amount_paid) if purchase else None
         }
         
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Stripe error verifying session: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

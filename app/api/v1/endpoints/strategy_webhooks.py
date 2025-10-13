@@ -38,7 +38,7 @@ async def handle_strategy_stripe_webhook(
             )
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid payload")
-        except stripe.error.SignatureVerificationError:
+        except stripe.SignatureVerificationError:
             raise HTTPException(status_code=400, detail="Invalid signature")
         
         # Handle different event types

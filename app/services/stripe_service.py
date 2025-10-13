@@ -55,7 +55,7 @@ class StripeService:
             logger.info(f"Verified {subscription.status} subscription for customer {customer_id}")
             return True
 
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe API error during subscription verification: {str(e)}")
             # In case of Stripe API errors, we should err on the side of caution
             return False
@@ -104,7 +104,7 @@ class StripeService:
             await self._update_customer_record(user, customer.id, db)
             return customer.id
 
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             self.logger.error(f"Stripe API error: {str(e)}")
             raise HTTPException(
                 status_code=400,
@@ -194,7 +194,7 @@ class StripeService:
             
             return session.url
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             self.logger.error(f"Stripe API error: {str(e)}")
             raise
     
@@ -235,7 +235,7 @@ class StripeService:
                 return_url=f"{settings.FRONTEND_URL}/dashboard"
             )
             return session.url
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             self.logger.error(f"Error creating portal session: {str(e)}")
             raise HTTPException(
                 status_code=400,
@@ -374,7 +374,7 @@ class StripeService:
                 expand=['data.product']
             )
             return prices.data
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             self.logger.error(f"Error fetching prices: {str(e)}")
             raise HTTPException(
                 status_code=400,

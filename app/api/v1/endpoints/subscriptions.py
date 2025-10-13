@@ -176,7 +176,7 @@ async def create_checkout_session(
         logger.info(f"Created checkout session for {tier}/{interval} with trial")
         return {"url": checkout_url}
         
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Stripe error during checkout creation: {str(e)}")
         raise HTTPException(
             status_code=400,
@@ -236,7 +236,7 @@ async def create_guest_checkout_session(
         logger.info(f"Created guest checkout session with trial for {email}")
         return {"url": checkout_url}
         
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Stripe error during checkout creation: {str(e)}")
         raise HTTPException(
             status_code=400,

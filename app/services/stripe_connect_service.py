@@ -56,7 +56,7 @@ class StripeConnectService:
             logger.info(f"Created Stripe Express account {account.id} for creator {creator_profile.id}")
             return account.id
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating account: {str(e)}")
             raise Exception(f"Failed to create Stripe account: {str(e)}")
         except Exception as e:
@@ -131,7 +131,7 @@ class StripeConnectService:
                     try:
                         stripe.Account.modify(account_id, **account_update_data)
                         logger.info(f"Updated Stripe account {account_id} with prefill data")
-                    except stripe.error.StripeError as update_error:
+                    except stripe.StripeError as update_error:
                         logger.warning(f"Could not update account prefill data: {update_error}")
                         # Continue with account link creation even if prefill fails
             
@@ -140,7 +140,7 @@ class StripeConnectService:
             logger.info(f"Created account link for account {account_id} with prefill data")
             return account_link
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating account link: {str(e)}")
             raise Exception(f"Failed to create account link: {str(e)}")
         except Exception as e:
@@ -183,7 +183,7 @@ class StripeConnectService:
             logger.info(f"Created payment intent {payment_intent.id} with fee {fee_cents} cents")
             return payment_intent
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating payment: {str(e)}")
             raise Exception(f"Failed to create payment: {str(e)}")
         except Exception as e:
@@ -222,7 +222,7 @@ class StripeConnectService:
             logger.info(f"Created subscription {subscription.id} with {application_fee_percent}% fee")
             return subscription
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating subscription: {str(e)}")
             raise Exception(f"Failed to create subscription: {str(e)}")
         except Exception as e:
@@ -255,7 +255,7 @@ class StripeConnectService:
             logger.info(f"Created price {price.id} for {amount} {currency}/{interval}")
             return price.id
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating price: {str(e)}")
             raise Exception(f"Failed to create price: {str(e)}")
         except Exception as e:
@@ -284,7 +284,7 @@ class StripeConnectService:
             logger.info(f"Created product {product.id} for strategy")
             return product.id
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating product: {str(e)}")
             raise Exception(f"Failed to create product: {str(e)}")
         except Exception as e:
@@ -304,7 +304,7 @@ class StripeConnectService:
             logger.info(f"Cancelled subscription {subscription_id}")
             return subscription
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error cancelling subscription: {str(e)}")
             raise Exception(f"Failed to cancel subscription: {str(e)}")
         except Exception as e:
@@ -395,7 +395,7 @@ class StripeConnectService:
                 "expires_at": account_session.expires_at
             }
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating account session: {str(e)}")
             raise Exception(f"Failed to create account session: {str(e)}")
         except Exception as e:
@@ -441,7 +441,7 @@ class StripeConnectService:
                 "account_id": account_id
             }
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error accepting TOS: {str(e)}")
             raise Exception(f"Failed to accept TOS: {str(e)}")
         except Exception as e:
@@ -501,7 +501,7 @@ class StripeConnectService:
             logger.info(f"Created Stripe product {product.id} for strategy '{strategy_name}' on account {stripe_account_id}")
             return product
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating strategy product: {str(e)}")
             raise Exception(f"Failed to create strategy product: {str(e)}")
         except Exception as e:
@@ -561,7 +561,7 @@ class StripeConnectService:
             logger.info(f"Created Stripe price {price.id} for ${amount} {billing_interval_str or 'one-time'} on account {stripe_account_id}")
             return price
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating strategy price: {str(e)}")
             raise Exception(f"Failed to create strategy price: {str(e)}")
         except Exception as e:
@@ -662,7 +662,7 @@ class StripeConnectService:
             logger.info(f"Deactivated Stripe price {price_id}")
             return price
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error deactivating price: {str(e)}")
             raise Exception(f"Failed to deactivate price: {str(e)}")
         except Exception as e:
@@ -687,7 +687,7 @@ class StripeConnectService:
             logger.info(f"Deleted Stripe product {product_id}")
             return product
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error deleting product: {str(e)}")
             raise Exception(f"Failed to delete product: {str(e)}")
         except Exception as e:
@@ -719,7 +719,7 @@ class StripeConnectService:
             
             return prices.data
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error getting product prices: {str(e)}")
             raise Exception(f"Failed to get product prices: {str(e)}")
         except Exception as e:
@@ -775,7 +775,7 @@ class StripeConnectService:
             logger.info(f"Created checkout session {session.id} for price {price_id}")
             return session
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error creating checkout session: {str(e)}")
             raise Exception(f"Failed to create checkout session: {str(e)}")
         except Exception as e:
@@ -791,7 +791,7 @@ class StripeConnectService:
             logger.info(f"Retrieved subscription {subscription_id}")
             return subscription
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error retrieving subscription: {str(e)}")
             raise Exception(f"Failed to retrieve subscription: {str(e)}")
         except Exception as e:
@@ -811,7 +811,7 @@ class StripeConnectService:
             logger.info(f"Reactivated subscription {subscription_id}")
             return subscription
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error reactivating subscription: {str(e)}")
             raise Exception(f"Failed to reactivate subscription: {str(e)}")
         except Exception as e:
@@ -839,7 +839,7 @@ class StripeConnectService:
             logger.info(f"Upgraded subscription {subscription_id} to price {new_price_id}")
             return updated_subscription
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error upgrading subscription: {str(e)}")
             raise Exception(f"Failed to upgrade subscription: {str(e)}")
         except Exception as e:
@@ -859,7 +859,7 @@ class StripeConnectService:
             logger.info(f"Retrieved {len(invoices.data)} invoices for subscription {subscription_id}")
             return invoices.data
             
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe error retrieving invoices: {str(e)}")
             raise Exception(f"Failed to retrieve invoices: {str(e)}")
         except Exception as e:
