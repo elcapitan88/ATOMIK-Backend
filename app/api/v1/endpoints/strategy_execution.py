@@ -24,8 +24,8 @@ class StrategySignalRequest(BaseModel):
     strategy_name: str = Field(..., description="Name of the strategy")
     timestamp: str = Field(..., description="ISO timestamp")
     comment: Optional[str] = Field(None, description="EXIT_50, EXIT_FINAL, etc.")
-    # Legacy fields for backward compatibility - will be ignored
-    symbol: Optional[str] = Field(None, description="DEPRECATED: Use ActivatedStrategy.ticker instead")
+    # Symbol field for multi-symbol strategies like Purple Reign
+    symbol: Optional[str] = Field(None, description="Trading symbol from strategy signal")
     quantity: Optional[int] = Field(None, description="DEPRECATED: Use ActivatedStrategy.quantity instead")
     price: Optional[float] = Field(None, description="DEPRECATED: Signal price not used")
 
@@ -61,7 +61,7 @@ async def execute_strategy_signal(
     4. Returns execution status
     """
     try:
-        logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} (minimal payload)")
+        logger.info(f"Strategy Engine signal: {signal.strategy_name} {signal.action} {signal.symbol or 'no-symbol'}")
         
         # Find active strategy configurations for this signal
         # We support two patterns:
@@ -79,11 +79,20 @@ async def execute_strategy_signal(
         if strategy_code:
             # Found a StrategyCode, use it to find activated strategies
             logger.info(f"Found StrategyCode record for '{signal.strategy_name}'")
-            engine_strategies = db.query(ActivatedStrategy).filter(
+
+            # Build query filters
+            filters = [
                 ActivatedStrategy.strategy_code_id == strategy_code.id,
                 ActivatedStrategy.execution_type == 'engine',
                 ActivatedStrategy.is_active == True
-            ).all()
+            ]
+
+            # If symbol is provided, filter by it (for multi-symbol strategies like Purple Reign)
+            if signal.symbol:
+                filters.append(ActivatedStrategy.ticker == signal.symbol)
+                logger.info(f"Filtering for symbol: {signal.symbol}")
+
+            engine_strategies = db.query(ActivatedStrategy).filter(*filters).all()
         
         # If no strategies found via StrategyCode, try direct name matching
         if not engine_strategies:
