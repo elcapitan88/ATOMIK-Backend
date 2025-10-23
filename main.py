@@ -40,6 +40,7 @@ from app.core.memory_monitor import memory_monitor
 from app.services.trading_service import order_monitoring_service
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.core.tasks import cleanup_expired_registrations
+from app.core.scheduler import setup_scheduler, shutdown_scheduler
 
 
 # Configure logging
@@ -169,6 +170,14 @@ async def lifespan(app: FastAPI):
         except Exception as memory_error:
             logger.warning(f"Memory monitoring initialization failed: {str(memory_error)}")
 
+        # Initialize scheduler for strategy scheduling
+        try:
+            logger.info("Starting background scheduler for strategy scheduling...")
+            setup_scheduler()
+            logger.info("Background scheduler started successfully - strategy scheduling is active")
+        except Exception as scheduler_error:
+            logger.error(f"Scheduler initialization failed: {str(scheduler_error)}")
+            logger.warning("Strategy scheduling feature will be disabled")
 
         logger.info("Application startup completed successfully")
         logger.info("🚀 PARTIAL EXIT FUNCTIONALITY DEPLOYED - VERSION 2025-08-18-22:08")
@@ -184,6 +193,13 @@ async def lifespan(app: FastAPI):
         try:
             logger.info("Initiating application shutdown...")
             
+            # Stop scheduler
+            try:
+                shutdown_scheduler()
+                logger.info("Background scheduler stopped")
+            except Exception as e:
+                logger.error(f"Error stopping scheduler: {e}")
+
             # Stop memory monitoring
             try:
                 await memory_monitor.stop_monitoring()
