@@ -255,8 +255,18 @@ async def login(
             if subscription.is_lifetime:
                 logger.info(f"User {user.email} has lifetime access - skipping Stripe verification")
                 has_active_subscription = True
+            elif not subscription.stripe_customer_id:
+                # Handle users with no Stripe customer ID
+                logger.warning(f"User {user.email} has no Stripe customer ID but active subscription (tier: {subscription.tier})")
+                # Allow starter tier without Stripe (free tier)
+                if subscription.tier == "starter":
+                    logger.info(f"User {user.email} is on starter tier - allowing access without Stripe")
+                    has_active_subscription = True
+                else:
+                    logger.error(f"User {user.email} on paid tier '{subscription.tier}' but missing Stripe customer ID")
+                    has_active_subscription = False
             else:
-                # Only verify with Stripe if not lifetime
+                # Only verify with Stripe if not lifetime and has valid customer ID
                 has_active_subscription = await stripe_service.verify_subscription_status(
                     subscription.stripe_customer_id
                 )
