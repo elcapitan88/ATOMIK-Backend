@@ -203,6 +203,15 @@ class SingleStrategyCreate(BaseModel):
             raise ValueError('Ticker must be alphanumeric')
         return v.upper()
 
+    @validator('market_schedule')
+    def validate_market_schedule(cls, v):
+        if v is not None:
+            valid_markets = ['NYSE', 'LONDON', 'ASIA', '24/7']
+            if not all(market in valid_markets for market in v):
+                invalid_markets = [m for m in v if m not in valid_markets]
+                raise ValueError(f'Invalid markets: {invalid_markets}. Valid markets are: {valid_markets}')
+        return v
+
     class Config:
         schema_extra = {
             "example": {
@@ -257,6 +266,15 @@ class MultipleStrategyCreate(BaseModel):
                 raise ValueError('Number of quantities must match number of follower accounts')
             if not all(q > 0 for q in v):
                 raise ValueError('All quantities must be greater than 0')
+        return v
+
+    @validator('market_schedule')
+    def validate_market_schedule(cls, v):
+        if v is not None:
+            valid_markets = ['NYSE', 'LONDON', 'ASIA', '24/7']
+            if not all(market in valid_markets for market in v):
+                invalid_markets = [m for m in v if m not in valid_markets]
+                raise ValueError(f'Invalid markets: {invalid_markets}. Valid markets are: {valid_markets}')
         return v
 
     class Config:
