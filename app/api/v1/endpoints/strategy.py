@@ -243,6 +243,22 @@ async def activate_strategy(
                 final_webhook_id = str(strategy.webhook_id) if strategy.webhook_id and execution_type == 'webhook' else None
                 final_strategy_code_id = strategy_code.id if strategy_code else (strategy.strategy_code_id if strategy.strategy_code_id else None)
 
+                # Determine initial active state based on market schedule
+                initial_is_active = True  # Default for non-scheduled strategies
+                schedule_active_state = None
+
+                # Handle market schedule if provided
+                if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
+                    if '24/7' not in strategy.market_schedule:
+                        # Check if ANY market is currently open
+                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
+                        schedule_active_state = any_market_open
+                        # Set initial active state based on market hours
+                        initial_is_active = any_market_open
+
+                        markets_str = ', '.join(strategy.market_schedule)
+                        logger.info(f"Strategy scheduled for markets: {markets_str}, currently {'ACTIVE' if any_market_open else 'INACTIVE'}")
+
                 db_strategy = ActivatedStrategy(
                     user_id=current_user.id,
                     strategy_type="single",
@@ -252,18 +268,10 @@ async def activate_strategy(
                     ticker=display_ticker,
                     account_id=str(strategy.account_id),
                     quantity=strategy.quantity,
-                    is_active=True
+                    is_active=initial_is_active,
+                    market_schedule=strategy.market_schedule if hasattr(strategy, 'market_schedule') else None,
+                    schedule_active_state=schedule_active_state
                 )
-
-                # Handle market schedule if provided
-                if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
-                    db_strategy.market_schedule = strategy.market_schedule
-                    # Set initial schedule state - ON if ANY market is open
-                    if '24/7' not in strategy.market_schedule:
-                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
-                        db_strategy.schedule_active_state = any_market_open
-                    else:
-                        db_strategy.schedule_active_state = None
                 
                 db.add(db_strategy)
                 db.flush()
@@ -366,6 +374,22 @@ async def activate_strategy(
 
                     follower_accounts.append(follower)
 
+                # Determine initial active state based on market schedule
+                initial_is_active = True  # Default for non-scheduled strategies
+                schedule_active_state = None
+
+                # Handle market schedule if provided
+                if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
+                    if '24/7' not in strategy.market_schedule:
+                        # Check if ANY market is currently open
+                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
+                        schedule_active_state = any_market_open
+                        # Set initial active state based on market hours
+                        initial_is_active = any_market_open
+
+                        markets_str = ', '.join(strategy.market_schedule)
+                        logger.info(f"Group strategy scheduled for markets: {markets_str}, currently {'ACTIVE' if any_market_open else 'INACTIVE'}")
+
                 # Create multiple account strategy with appropriate execution type
                 db_strategy = ActivatedStrategy(
                     user_id=current_user.id,
@@ -377,18 +401,10 @@ async def activate_strategy(
                     leader_account_id=leader_account.account_id,
                     leader_quantity=strategy.leader_quantity,
                     group_name=strategy.group_name,
-                    is_active=True
+                    is_active=initial_is_active,
+                    market_schedule=strategy.market_schedule if hasattr(strategy, 'market_schedule') else None,
+                    schedule_active_state=schedule_active_state
                 )
-
-                # Handle market schedule if provided
-                if hasattr(strategy, 'market_schedule') and strategy.market_schedule:
-                    db_strategy.market_schedule = strategy.market_schedule
-                    # Set initial schedule state - ON if ANY market is open
-                    if '24/7' not in strategy.market_schedule:
-                        any_market_open = any(is_market_open(market) for market in strategy.market_schedule)
-                        db_strategy.schedule_active_state = any_market_open
-                    else:
-                        db_strategy.schedule_active_state = None
 
                 db.add(db_strategy)
                 db.flush()
