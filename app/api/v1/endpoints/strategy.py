@@ -935,7 +935,22 @@ async def update_strategy(
             # Log warning if trying to update single-account fields on multi strategy
             if strategy_update.quantity is not None:
                 logger.warning(f"Ignoring quantity update on multiple strategy")
-        
+
+        # Handle market schedule update
+        if strategy_update.market_schedule is not None:
+            strategy.market_schedule = strategy_update.market_schedule
+
+            # Update schedule active state based on current market status
+            if strategy_update.market_schedule and '24/7' not in strategy_update.market_schedule:
+                from app.core.market_hours import is_market_open
+                any_market_open = any(is_market_open(m) for m in strategy_update.market_schedule)
+                strategy.schedule_active_state = any_market_open
+            else:
+                strategy.schedule_active_state = None
+
+            changes_made = True
+            logger.info(f"Updated market_schedule to {strategy_update.market_schedule}")
+
         if not changes_made:
             raise HTTPException(
                 status_code=400,

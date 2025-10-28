@@ -279,11 +279,21 @@ class StrategyUpdate(BaseModel):
     quantity: Optional[int] = Field(None, gt=0)
     leader_quantity: Optional[int] = Field(None, gt=0)
     follower_quantities: Optional[List[int]] = Field(None, min_items=1)
+    market_schedule: Optional[List[str]] = Field(None, description="Array of market hours schedules (e.g., ['NYSE', 'LONDON'])")
 
     @validator('follower_quantities')
     def validate_quantities(cls, v):
         if v is not None and not all(q > 0 for q in v):
             raise ValueError('All quantities must be greater than 0')
+        return v
+
+    @validator('market_schedule')
+    def validate_market_schedule(cls, v):
+        if v is not None:
+            valid_markets = ['NYSE', 'LONDON', 'ASIA', '24/7']
+            if not all(market in valid_markets for market in v):
+                invalid_markets = [m for m in v if m not in valid_markets]
+                raise ValueError(f'Invalid markets: {invalid_markets}. Valid markets are: {valid_markets}')
         return v
 
     class Config:
@@ -292,6 +302,7 @@ class StrategyUpdate(BaseModel):
                 "is_active": True,
                 "quantity": 2,
                 "leader_quantity": 2,
+                "market_schedule": ["NYSE", "LONDON"],
                 "follower_quantities": [1, 1]
             }
         }
