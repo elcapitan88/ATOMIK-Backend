@@ -551,7 +551,11 @@ async def list_strategies(
                     "webhook": {
                         "name": strategy.webhook.name if strategy.webhook else None,
                         "source_type": strategy.webhook.source_type if strategy.webhook else "custom"
-                    }
+                    },
+                    # Include scheduling fields
+                    "market_schedule": strategy.market_schedule,
+                    "schedule_active_state": strategy.schedule_active_state,
+                    "last_scheduled_toggle": strategy.last_scheduled_toggle
                 }
 
                 # Add strategy name based on type
