@@ -688,7 +688,12 @@ async def get_user_activated_strategies(
                 # Default values
                 "name": "Unknown Strategy",
                 "description": "Strategy details unavailable",
-                "category": "Unknown"
+                "category": "Unknown",
+
+                # Scheduling fields
+                "market_schedule": strategy.market_schedule,
+                "schedule_active_state": strategy.schedule_active_state,
+                "last_scheduled_toggle": strategy.last_scheduled_toggle.isoformat() if strategy.last_scheduled_toggle else None
             }
             
             # Enrich with webhook data if it's a webhook strategy
