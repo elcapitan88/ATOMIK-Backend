@@ -76,8 +76,8 @@ class InteractiveBrokersBroker(BaseBroker):
             # ESZ24 -> ES (2 chars) + Z24 (month/year)
             # MESU5 -> MES (3 chars) + U5 (month/year)
             if len(symbol) >= 4:
-                # Handle 3-character roots (MES, NKD, etc.)
-                if symbol.startswith(('MES', 'NKD', 'RTY', 'YMM')):
+                # Handle 3-character roots (MES, MGC, NKD, etc.)
+                if symbol.startswith(('MES', 'MGC', 'NKD', 'RTY', 'YMM')):
                     root = symbol[:3]
                 else:
                     # Handle 2-character roots (ES, NQ, CL, etc.)

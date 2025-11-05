@@ -104,7 +104,7 @@ class TestFuturesContractManager:
             contracts = FuturesContractManager.get_current_contracts()
             
             # Check all expected symbols
-            expected_symbols = ['ES', 'NQ', 'CL', 'GC', 'MES', 'MNQ', 'RTY', 'YM']
+            expected_symbols = ['ES', 'NQ', 'CL', 'GC', 'MES', 'MNQ', 'MGC', 'RTY', 'YM']
             for symbol in expected_symbols:
                 assert symbol in contracts
                 assert contracts[symbol] == f"{symbol}M5"
@@ -126,7 +126,7 @@ class TestFuturesContractManager:
         
         # Validate contracts
         assert isinstance(info['contracts'], dict)
-        assert len(info['contracts']) == 8  # 8 symbols
+        assert len(info['contracts']) == 9  # 9 symbols
         
         # Validate date formats
         datetime.fromisoformat(info['next_rollover_date'])
@@ -147,7 +147,7 @@ class TestFuturesContractManager:
     
     def test_futures_symbols(self):
         """Test that all required futures symbols are present."""
-        expected_symbols = ['ES', 'NQ', 'CL', 'GC', 'MES', 'MNQ', 'RTY', 'YM']
+        expected_symbols = ['ES', 'NQ', 'CL', 'GC', 'MES', 'MNQ', 'MGC', 'RTY', 'YM']
         assert FuturesContractManager.FUTURES_SYMBOLS == expected_symbols
 
 
@@ -157,7 +157,7 @@ def test_get_current_futures_contracts():
     from futures_contracts import get_current_futures_contracts
     contracts = get_current_futures_contracts()
     assert isinstance(contracts, dict)
-    assert len(contracts) == 8
+    assert len(contracts) == 9
 
 
 def test_get_contract_for_symbol():

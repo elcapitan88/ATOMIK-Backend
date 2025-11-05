@@ -34,7 +34,7 @@ from app.services.subscription_service import SubscriptionService
 from app.core.permissions import check_subscription, check_resource_limit
 from app.utils.ticker_utils import get_display_ticker, validate_ticker
 
-router = APIRouter(prefix="/api/v1/strategies", tags=["unified-strategies"])
+router = APIRouter(tags=["unified-strategies"])
 logger = logging.getLogger(__name__)
 
 

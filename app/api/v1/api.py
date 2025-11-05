@@ -49,27 +49,18 @@ api_router.include_router(broker.router, prefix="/brokers", tags=["brokers"])
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 
-# NEW: Unified strategy endpoints (if available) - these take priority
-if 'strategy_unified' in locals() and strategy_unified is not None:
-    logger.info("Registering unified strategy endpoints...")
-    # Remove the /api/v1/strategies prefix since it's in the router definition
-    api_router.include_router(strategy_unified.router, tags=["unified-strategies"])
-    logger.info("Unified strategy endpoints registered - these will handle all strategy operations")
+# Strategy endpoints configuration
+# For now, just use the legacy endpoints since the unified endpoints don't have all required functionality yet
+logger.info("Using original strategy endpoints for compatibility")
+# Original strategy routers - main strategy router should be first for engine/configure
+api_router.include_router(strategy.router, prefix="/strategies", tags=["strategies"])
+api_router.include_router(strategy_codes.router, prefix="/strategies", tags=["strategy-codes"])
+api_router.include_router(engine_strategies.router, prefix="/strategies", tags=["engine-strategies"])
 
-    # OPTIONAL: Keep old endpoints for backward compatibility but log deprecation
-    USE_LEGACY_ENDPOINTS = True  # Set to False to disable old endpoints
-    if USE_LEGACY_ENDPOINTS:
-        logger.warning("Legacy strategy endpoints are enabled for backward compatibility")
-        # Old strategy routers - kept for backward compatibility
-        api_router.include_router(strategy.router, prefix="/strategies/legacy", tags=["strategies-legacy"])
-        api_router.include_router(strategy_codes.router, prefix="/strategies/legacy", tags=["strategy-codes-legacy"])
-        api_router.include_router(engine_strategies.router, prefix="/strategies/legacy", tags=["engine-strategies-legacy"])
-else:
-    logger.info("Using original strategy endpoints (unified not available)")
-    # Original strategy routers - main strategy router should be first for engine/configure
-    api_router.include_router(strategy.router, prefix="/strategies", tags=["strategies"])
-    api_router.include_router(strategy_codes.router, prefix="/strategies", tags=["strategy-codes"])
-    api_router.include_router(engine_strategies.router, prefix="/strategies", tags=["engine-strategies"])
+# Register unified endpoints separately if available (for future migration)
+if 'strategy_unified' in locals() and strategy_unified is not None:
+    logger.info("Unified strategy endpoints available at /strategies/unified for testing")
+    api_router.include_router(strategy_unified.router, prefix="/strategies/unified", tags=["unified-strategies"])
 
 api_router.include_router(strategy_execution.router, prefix="/trades", tags=["strategy-execution"])
 # Old monetization system removed - consolidated into marketplace
