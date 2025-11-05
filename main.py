@@ -21,14 +21,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 
 # Local imports
-print("🔍 [MAIN] About to import API router...")
+print("[MAIN] About to import API router...")
 try:
     from app.api.v1.api import api_router, tradovate_callback_router
-    print("✅ [MAIN] API router imported successfully")
+    print("[MAIN] API router imported successfully")
 except Exception as e:
-    print(f"❌ [MAIN] Failed to import API router: {e}")
+    print(f"[ERROR] [MAIN] Failed to import API router: {e}")
     import traceback
-    print(f"❌ [MAIN] Traceback: {traceback.format_exc()}")
+    print(f"[ERROR] [MAIN] Traceback: {traceback.format_exc()}")
     
 from app.webhooks import rewardful
 from app.core.config import settings
@@ -180,7 +180,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Strategy scheduling feature will be disabled")
 
         logger.info("Application startup completed successfully")
-        logger.info("🚀 PARTIAL EXIT FUNCTIONALITY DEPLOYED - VERSION 2025-08-18-22:08")
+        logger.info("PARTIAL EXIT FUNCTIONALITY DEPLOYED - VERSION 2025-08-18-22:08")
         yield
 
     except Exception as e:
@@ -329,20 +329,20 @@ class Config:
 try:
     if 'tradovate_callback_router' in locals():
         app.include_router(tradovate_callback_router, prefix="/api")
-        print("✅ [MAIN] Tradovate callback router registered")
+        print("[MAIN] Tradovate callback router registered")
     else:
         print("⚠️ [MAIN] Tradovate callback router not available")
 except Exception as e:
-    print(f"❌ [MAIN] Error registering tradovate callback router: {e}")
+    print(f"[ERROR] [MAIN] Error registering tradovate callback router: {e}")
 
 try:
     if 'api_router' in locals():
         app.include_router(api_router, prefix="/api/v1")
-        print("✅ [MAIN] API router registered")
+        print("[MAIN] API router registered")
     else:
-        print("❌ [MAIN] API router not available")
+        print("[ERROR] [MAIN] API router not available")
 except Exception as e:
-    print(f"❌ [MAIN] Error registering API router: {e}")
+    print(f"[ERROR] [MAIN] Error registering API router: {e}")
 
 app.include_router(rewardful.router)
 
@@ -569,7 +569,7 @@ async def refresh_db_metadata():
         # Check affiliates table for payout columns
         if 'affiliates' in tables:
             affiliate_cols = [col['name'] for col in inspector.get_columns('affiliates')]
-            logger.info(f"🔍 AFFILIATES COLUMNS: {', '.join(affiliate_cols)}")
+            logger.info(f"AFFILIATES COLUMNS: {', '.join(affiliate_cols)}")
             
             has_payout_method = 'payout_method' in affiliate_cols
             has_payout_details = 'payout_details' in affiliate_cols

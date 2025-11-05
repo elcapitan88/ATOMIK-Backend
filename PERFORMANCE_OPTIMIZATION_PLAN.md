@@ -17,7 +17,7 @@
 - Private networking between services (no internet routing)
 - Persistent connections work better in same datacenter
 
-#### Current Issue:
+#### Current Issue:t
 - New database connection created for every webhook request
 - Connection establishment takes 50-100ms per request
 - Not leveraging Railway's internal networking
