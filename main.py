@@ -331,7 +331,7 @@ try:
         app.include_router(tradovate_callback_router, prefix="/api")
         print("[MAIN] Tradovate callback router registered")
     else:
-        print("⚠️ [MAIN] Tradovate callback router not available")
+        print("[WARNING] [MAIN] Tradovate callback router not available")
 except Exception as e:
     print(f"[ERROR] [MAIN] Error registering tradovate callback router: {e}")
 
