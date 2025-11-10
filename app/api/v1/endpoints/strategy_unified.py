@@ -325,6 +325,39 @@ async def test_auth_dependency(current_user=Depends(get_current_user)):
     return {"user_id": current_user.id if current_user else None}
 
 
+@router.get("/test-both")
+async def test_both_dependencies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """Test endpoint with both dependencies"""
+    print("DEBUG: /test-both endpoint hit!", file=sys.stderr, flush=True)
+    logger.error(f"DEBUG: test-both - user_id={current_user.id}, db={db is not None}")
+
+    # Try a simple query
+    try:
+        from app.models.strategy import ActivatedStrategy
+        count = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id
+        ).count()
+        logger.error(f"DEBUG: Found {count} strategies for user {current_user.id}")
+        return {"user_id": current_user.id, "db": "connected", "strategy_count": count}
+    except Exception as e:
+        logger.error(f"DEBUG: Error in test-both: {str(e)}")
+        return {"error": str(e)}
+
+
+@router.get("/test-minimal")
+async def test_minimal_list(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """Test without query parameters"""
+    print("DEBUG: /test-minimal endpoint hit!", file=sys.stderr, flush=True)
+    logger.error(f"DEBUG: test-minimal - user_id={current_user.id}")
+    return []
+
+
 @router.get("/", response_model=List[UnifiedStrategyResponse])
 async def list_strategies(
     execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
