@@ -52,7 +52,7 @@ async def check_database_health(retries=3, retry_delay=2) -> Dict[str, Any]:
                     query_start = time.time()
                     db.execute(text("SELECT 1"))
                     query_time = time.time() - query_start
-                    
+
                     result["connection"] = True
                     result["query_response_time_ms"] = round(query_time * 1000, 2)
                     
