@@ -51,6 +51,13 @@ print(f"DEBUG: strategy_unified.py module loaded", file=sys.stderr, flush=True)
 logger.error("DEBUG: strategy_unified.py module imported")
 
 
+@router.get("/debug-test")
+async def debug_test_endpoint():
+    """Direct test endpoint with no dependencies"""
+    print("DEBUG: /debug-test endpoint hit!", file=sys.stderr, flush=True)
+    return {"status": "test endpoint working", "message": "No dependencies"}
+
+
 # Helper Functions
 def validate_webhook_access(webhook_id: str, user, db: Session) -> bool:
     """Check if user has access to webhook"""
@@ -295,6 +302,13 @@ async def create_strategy(
         logger.error(f"Error creating strategy: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/simple-list")
+async def simple_list_strategies():
+    """Test endpoint with minimal dependencies"""
+    print("DEBUG: /simple-list endpoint hit!", file=sys.stderr, flush=True)
+    return []
 
 
 @router.get("/", response_model=List[UnifiedStrategyResponse])
