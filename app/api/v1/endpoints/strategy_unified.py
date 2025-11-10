@@ -6,7 +6,7 @@ This replaces the separate /strategies and /strategies/engine endpoints.
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import logging
 from datetime import datetime
 
@@ -28,7 +28,15 @@ from app.schemas.strategy_unified import (
     StrategyListFilters,
     StrategyBatchOperation,
     StrategyType,
-    ExecutionType
+    ExecutionType,
+    FollowerAccount
+)
+# Import legacy schemas for backward compatibility
+from app.schemas.strategy import (
+    SingleStrategyCreate,
+    MultipleStrategyCreate,
+    EngineStrategyCreate,
+    EngineStrategyUpdate
 )
 from app.services.subscription_service import SubscriptionService
 from app.core.permissions import check_subscription, check_resource_limit
@@ -639,6 +647,63 @@ async def validate_strategy(
     )
 
 
+@router.get("/my-strategies", response_model=List[UnifiedStrategyResponse])
+async def get_my_strategies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Get strategies created by the current user.
+    This endpoint is for backward compatibility with legacy frontend.
+    """
+    strategies = db.query(ActivatedStrategy).options(
+        joinedload(ActivatedStrategy.broker_account),
+        joinedload(ActivatedStrategy.leader_broker_account),
+        joinedload(ActivatedStrategy.webhook),
+        joinedload(ActivatedStrategy.strategy_code)
+    ).filter(
+        ActivatedStrategy.user_id == current_user.id
+    ).order_by(ActivatedStrategy.created_at.desc()).all()
+
+    # Add follower information for multiple strategies
+    for strategy in strategies:
+        if strategy.strategy_type == StrategyType.MULTIPLE:
+            strategy.follower_account_ids = strategy.get_follower_accounts()
+            strategy.follower_quantities = strategy.get_follower_quantities()
+
+    return strategies
+
+
+@router.get("/user-activated", response_model=List[UnifiedStrategyResponse])
+async def get_user_activated_strategies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Get all strategies activated by the current user.
+    This includes both strategies created by the user and strategies they're subscribed to.
+    This endpoint is for backward compatibility with legacy frontend.
+    """
+    # Get all strategies for the user (both created and subscribed)
+    strategies = db.query(ActivatedStrategy).options(
+        joinedload(ActivatedStrategy.broker_account),
+        joinedload(ActivatedStrategy.leader_broker_account),
+        joinedload(ActivatedStrategy.webhook),
+        joinedload(ActivatedStrategy.strategy_code)
+    ).filter(
+        ActivatedStrategy.user_id == current_user.id,
+        ActivatedStrategy.is_active == True
+    ).order_by(ActivatedStrategy.created_at.desc()).all()
+
+    # Add follower information for multiple strategies
+    for strategy in strategies:
+        if strategy.strategy_type == StrategyType.MULTIPLE:
+            strategy.follower_account_ids = strategy.get_follower_accounts()
+            strategy.follower_quantities = strategy.get_follower_quantities()
+
+    return strategies
+
+
 @router.post("/batch", response_model=Dict[str, Any])
 @check_subscription
 async def batch_operation(
@@ -709,3 +774,144 @@ async def batch_operation(
         logger.error(f"Error in batch operation: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Legacy endpoint mappings for backward compatibility
+
+@router.post("/activate", response_model=UnifiedStrategyResponse)
+@check_subscription
+@check_resource_limit("active_strategies")
+async def activate_strategy(
+    strategy_data: Union[SingleStrategyCreate, MultipleStrategyCreate],
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Legacy endpoint for activating a webhook strategy.
+    Maps to the unified create_strategy endpoint.
+    """
+    # Convert legacy format to unified format
+    unified_data = UnifiedStrategyCreate(
+        strategy_type=strategy_data.strategy_type,
+        execution_type=ExecutionType.WEBHOOK,
+        webhook_id=strategy_data.webhook_id,
+        ticker=strategy_data.ticker,
+        is_active=True,
+        account_id=getattr(strategy_data, 'account_id', None),
+        quantity=getattr(strategy_data, 'quantity', None),
+        leader_account_id=getattr(strategy_data, 'leader_account_id', None),
+        leader_quantity=getattr(strategy_data, 'leader_quantity', None),
+        follower_accounts=[
+            FollowerAccount(account_id=acc_id, quantity=qty)
+            for acc_id, qty in zip(
+                getattr(strategy_data, 'follower_account_ids', []) or [],
+                getattr(strategy_data, 'follower_quantities', []) or []
+            )
+        ] if hasattr(strategy_data, 'follower_account_ids') else None
+    )
+
+    return await create_strategy(unified_data, db, current_user)
+
+
+@router.get("/list", response_model=List[UnifiedStrategyResponse])
+async def list_strategies_legacy(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Legacy endpoint for listing webhook strategies.
+    Maps to the unified list_strategies endpoint with webhook filter.
+    """
+    return await list_strategies(
+        execution_type=ExecutionType.WEBHOOK,
+        db=db,
+        current_user=current_user
+    )
+
+
+@router.post("/engine/configure", response_model=UnifiedStrategyResponse)
+@check_subscription
+@check_resource_limit("active_strategies")
+async def configure_engine_strategy(
+    strategy_data: EngineStrategyCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Legacy endpoint for configuring an engine strategy.
+    Maps to the unified create_strategy endpoint.
+    """
+    # Convert legacy format to unified format
+    unified_data = UnifiedStrategyCreate(
+        strategy_type=strategy_data.strategy_type,
+        execution_type=ExecutionType.ENGINE,
+        strategy_code_id=strategy_data.strategy_code_id,
+        ticker=strategy_data.ticker,
+        is_active=getattr(strategy_data, 'is_active', True),
+        account_id=getattr(strategy_data, 'account_id', None),
+        quantity=getattr(strategy_data, 'quantity', None),
+        leader_account_id=getattr(strategy_data, 'leader_account_id', None),
+        leader_quantity=getattr(strategy_data, 'leader_quantity', None),
+        follower_accounts=[
+            FollowerAccount(account_id=acc_id, quantity=qty)
+            for acc_id, qty in zip(
+                getattr(strategy_data, 'follower_account_ids', []) or [],
+                getattr(strategy_data, 'follower_quantities', []) or []
+            )
+        ] if hasattr(strategy_data, 'follower_account_ids') else None
+    )
+
+    return await create_strategy(unified_data, db, current_user)
+
+
+@router.get("/engine/list", response_model=List[UnifiedStrategyResponse])
+async def list_engine_strategies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Legacy endpoint for listing engine strategies.
+    Maps to the unified list_strategies endpoint with engine filter.
+    """
+    return await list_strategies(
+        execution_type=ExecutionType.ENGINE,
+        db=db,
+        current_user=current_user
+    )
+
+
+@router.put("/engine/{strategy_id}", response_model=UnifiedStrategyResponse)
+@check_subscription
+async def update_engine_strategy(
+    strategy_id: int,
+    updates: EngineStrategyUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Legacy endpoint for updating an engine strategy.
+    Maps to the unified update_strategy endpoint.
+    """
+    # Convert legacy format to unified format
+    unified_updates = UnifiedStrategyUpdate(
+        is_active=updates.is_active if hasattr(updates, 'is_active') else None,
+        quantity=updates.quantity if hasattr(updates, 'quantity') else None,
+        leader_quantity=updates.leader_quantity if hasattr(updates, 'leader_quantity') else None,
+        follower_quantities=updates.follower_quantities if hasattr(updates, 'follower_quantities') else None,
+        description=updates.description if hasattr(updates, 'description') else None
+    )
+
+    return await update_strategy(strategy_id, unified_updates, db, current_user)
+
+
+@router.delete("/engine/{strategy_id}")
+async def delete_engine_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Legacy endpoint for deleting an engine strategy.
+    Maps to the unified delete_strategy endpoint.
+    """
+    return await delete_strategy(strategy_id, db, current_user)
