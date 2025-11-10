@@ -311,6 +311,20 @@ async def simple_list_strategies():
     return []
 
 
+@router.get("/test-db")
+async def test_db_dependency(db: Session = Depends(get_db)):
+    """Test endpoint with only database dependency"""
+    print("DEBUG: /test-db endpoint hit with db!", file=sys.stderr, flush=True)
+    return {"db": "connected"}
+
+
+@router.get("/test-auth")
+async def test_auth_dependency(current_user=Depends(get_current_user)):
+    """Test endpoint with only auth dependency"""
+    print("DEBUG: /test-auth endpoint hit with user!", file=sys.stderr, flush=True)
+    return {"user_id": current_user.id if current_user else None}
+
+
 @router.get("/", response_model=List[UnifiedStrategyResponse])
 async def list_strategies(
     execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
