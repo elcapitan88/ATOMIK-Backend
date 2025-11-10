@@ -358,6 +358,40 @@ async def test_minimal_list(
     return []
 
 
+@router.get("/test-no-joins")
+async def test_no_joins(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """Test without joinedload to see if that's causing the hang"""
+    print("DEBUG: /test-no-joins endpoint hit!", file=sys.stderr, flush=True)
+    logger.error(f"DEBUG: test-no-joins - user_id={current_user.id}")
+
+    try:
+        # Simple query without any joins
+        from app.models.strategy import ActivatedStrategy
+        strategies = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id
+        ).all()
+
+        logger.error(f"DEBUG: Found {len(strategies)} strategies without joins")
+
+        # Return simple list of dicts to avoid serialization issues
+        return [
+            {
+                "id": s.id,
+                "ticker": s.ticker,
+                "strategy_type": s.strategy_type,
+                "execution_type": s.execution_type,
+                "is_active": s.is_active
+            }
+            for s in strategies
+        ]
+    except Exception as e:
+        logger.error(f"DEBUG: Error in test-no-joins: {str(e)}", exc_info=True)
+        return {"error": str(e)}
+
+
 @router.get("/", response_model=List[UnifiedStrategyResponse])
 async def list_strategies(
     execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
@@ -385,12 +419,11 @@ async def list_strategies(
         logger.info(f"list_strategies called for user {current_user.id}")
         logger.info(f"Filters: execution_type={execution_type}, strategy_type={strategy_type}, is_active={is_active}, ticker={ticker}, account_id={account_id}")
 
-        query = db.query(ActivatedStrategy).options(
-            joinedload(ActivatedStrategy.broker_account),
-            joinedload(ActivatedStrategy.leader_broker_account),
-            joinedload(ActivatedStrategy.webhook),
-            joinedload(ActivatedStrategy.strategy_code)
-        ).filter(ActivatedStrategy.user_id == current_user.id)
+        # TEMPORARY FIX: Remove joinedload to prevent hanging
+        # The joinedload was causing the endpoint to hang silently
+        query = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id
+        )
 
         # Apply filters
         if execution_type:
