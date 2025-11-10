@@ -56,16 +56,18 @@ if 'strategy_unified' in locals() and strategy_unified is not None:
     # Register unified endpoints at /strategies for primary use
     api_router.include_router(strategy_unified.router, prefix="/strategies", tags=["strategies"])
 
+    # Register strategy codes at /strategies/codes to avoid conflicts
+    api_router.include_router(strategy_codes.router, prefix="/strategies/codes", tags=["strategy-codes"])
+
     # Keep legacy endpoints at /strategies/legacy for backward compatibility if needed
     logger.info("Legacy endpoints available at /strategies/legacy for backward compatibility")
     api_router.include_router(strategy.router, prefix="/strategies/legacy", tags=["legacy-strategies"])
-    api_router.include_router(strategy_codes.router, prefix="/strategies/legacy", tags=["legacy-strategy-codes"])
     api_router.include_router(engine_strategies.router, prefix="/strategies/legacy", tags=["legacy-engine-strategies"])
 else:
     # Fallback to legacy endpoints if unified not available
     logger.warning("Unified strategy endpoints not available, using legacy endpoints")
     api_router.include_router(strategy.router, prefix="/strategies", tags=["strategies"])
-    api_router.include_router(strategy_codes.router, prefix="/strategies", tags=["strategy-codes"])
+    api_router.include_router(strategy_codes.router, prefix="/strategies/codes", tags=["strategy-codes"])
     api_router.include_router(engine_strategies.router, prefix="/strategies", tags=["engine-strategies"])
 
 api_router.include_router(strategy_execution.router, prefix="/trades", tags=["strategy-execution"])
