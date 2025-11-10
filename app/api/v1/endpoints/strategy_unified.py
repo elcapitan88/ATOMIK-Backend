@@ -45,6 +45,11 @@ from app.utils.ticker_utils import get_display_ticker, validate_ticker
 router = APIRouter(tags=["unified-strategies"])
 logger = logging.getLogger(__name__)
 
+# Debug: Log when module is imported
+import sys
+print(f"DEBUG: strategy_unified.py module loaded", file=sys.stderr, flush=True)
+logger.error("DEBUG: strategy_unified.py module imported")
+
 
 # Helper Functions
 def validate_webhook_access(webhook_id: str, user, db: Session) -> bool:
@@ -292,7 +297,7 @@ async def create_strategy(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/")  # Temporarily remove response_model to debug
+@router.get("/", response_model=List[UnifiedStrategyResponse])
 async def list_strategies(
     execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
     strategy_type: Optional[StrategyType] = Query(None, description="Filter by strategy type"),
@@ -309,11 +314,13 @@ async def list_strategies(
     - GET /strategies/list
     - GET /strategies/engine/list
     """
-    # Immediate debug logging
-    logger.error(f"DEBUG: list_strategies endpoint hit!")
+    # Log immediately when function is called
+    import sys
+    print("DEBUG: list_strategies function called!", file=sys.stderr, flush=True)
+    logger.error("DEBUG: list_strategies function entered!")
 
     try:
-        logger.error(f"DEBUG: Current user ID: {current_user.id if current_user else 'NO USER'}")
+        logger.error(f"DEBUG: User authenticated: {current_user.id if current_user else 'NO USER'}")
         logger.info(f"list_strategies called for user {current_user.id}")
         logger.info(f"Filters: execution_type={execution_type}, strategy_type={strategy_type}, is_active={is_active}, ticker={ticker}, account_id={account_id}")
 
