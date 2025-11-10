@@ -292,7 +292,7 @@ async def create_strategy(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/", response_model=List[UnifiedStrategyResponse])
+@router.get("/")  # Temporarily remove response_model to debug
 async def list_strategies(
     execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
     strategy_type: Optional[StrategyType] = Query(None, description="Filter by strategy type"),
@@ -309,7 +309,11 @@ async def list_strategies(
     - GET /strategies/list
     - GET /strategies/engine/list
     """
+    # Immediate debug logging
+    logger.error(f"DEBUG: list_strategies endpoint hit!")
+
     try:
+        logger.error(f"DEBUG: Current user ID: {current_user.id if current_user else 'NO USER'}")
         logger.info(f"list_strategies called for user {current_user.id}")
         logger.info(f"Filters: execution_type={execution_type}, strategy_type={strategy_type}, is_active={is_active}, ticker={ticker}, account_id={account_id}")
 
@@ -337,7 +341,13 @@ async def list_strategies(
 
         strategies = query.all()
 
+        logger.error(f"DEBUG: Query executed, found {len(strategies)} strategies")
         logger.info(f"Found {len(strategies)} strategies for user {current_user.id}")
+
+        # Debug: Return simple dict to test if serialization is the issue
+        if len(strategies) == 0:
+            logger.error("DEBUG: No strategies found, returning empty list")
+            return []
 
         # Add follower information for multiple strategies
         for strategy in strategies:
