@@ -46,13 +46,6 @@ router = APIRouter(tags=["unified-strategies"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("/test")
-async def test_endpoint():
-    """Simple test endpoint to verify routing"""
-    logger.error("TEST ENDPOINT HIT!")
-    return {"status": "ok", "message": "Test endpoint working"}
-
-
 # Helper Functions
 def validate_webhook_access(webhook_id: str, user, db: Session) -> bool:
     """Check if user has access to webhook"""
@@ -301,24 +294,21 @@ async def create_strategy(
 
 @router.get("/")  # Temporarily remove response_model to debug
 async def list_strategies(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """
-    List all user strategies - SIMPLIFIED FOR DEBUGGING
-    """
-    # Return immediately to test if endpoint is reachable
-    logger.error("DEBUG: list_strategies START")
-    return []  # Return empty list immediately
-
-    # Original code commented out for debugging
-    """
     execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
     strategy_type: Optional[StrategyType] = Query(None, description="Filter by strategy type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     ticker: Optional[str] = Query(None, description="Filter by ticker"),
     account_id: Optional[str] = Query(None, description="Filter by account"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    List all user strategies with optional filters.
 
+    This unified endpoint replaces:
+    - GET /strategies/list
+    - GET /strategies/engine/list
+    """
     # Immediate debug logging
     logger.error(f"DEBUG: list_strategies endpoint hit!")
 
