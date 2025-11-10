@@ -309,37 +309,52 @@ async def list_strategies(
     - GET /strategies/list
     - GET /strategies/engine/list
     """
-    query = db.query(ActivatedStrategy).options(
-        joinedload(ActivatedStrategy.broker_account),
-        joinedload(ActivatedStrategy.leader_broker_account),
-        joinedload(ActivatedStrategy.webhook),
-        joinedload(ActivatedStrategy.strategy_code)
-    ).filter(ActivatedStrategy.user_id == current_user.id)
+    try:
+        logger.info(f"list_strategies called for user {current_user.id}")
+        logger.info(f"Filters: execution_type={execution_type}, strategy_type={strategy_type}, is_active={is_active}, ticker={ticker}, account_id={account_id}")
 
-    # Apply filters
-    if execution_type:
-        query = query.filter(ActivatedStrategy.execution_type == execution_type)
-    if strategy_type:
-        query = query.filter(ActivatedStrategy.strategy_type == strategy_type)
-    if is_active is not None:
-        query = query.filter(ActivatedStrategy.is_active == is_active)
-    if ticker:
-        query = query.filter(ActivatedStrategy.ticker == ticker)
-    if account_id:
-        query = query.filter(
-            (ActivatedStrategy.account_id == account_id) |
-            (ActivatedStrategy.leader_account_id == account_id)
-        )
+        query = db.query(ActivatedStrategy).options(
+            joinedload(ActivatedStrategy.broker_account),
+            joinedload(ActivatedStrategy.leader_broker_account),
+            joinedload(ActivatedStrategy.webhook),
+            joinedload(ActivatedStrategy.strategy_code)
+        ).filter(ActivatedStrategy.user_id == current_user.id)
 
-    strategies = query.all()
+        # Apply filters
+        if execution_type:
+            query = query.filter(ActivatedStrategy.execution_type == execution_type)
+        if strategy_type:
+            query = query.filter(ActivatedStrategy.strategy_type == strategy_type)
+        if is_active is not None:
+            query = query.filter(ActivatedStrategy.is_active == is_active)
+        if ticker:
+            query = query.filter(ActivatedStrategy.ticker == ticker)
+        if account_id:
+            query = query.filter(
+                (ActivatedStrategy.account_id == account_id) |
+                (ActivatedStrategy.leader_account_id == account_id)
+            )
 
-    # Add follower information for multiple strategies
-    for strategy in strategies:
-        if strategy.strategy_type == StrategyType.MULTIPLE:
-            strategy.follower_account_ids = strategy.get_follower_accounts()
-            strategy.follower_quantities = strategy.get_follower_quantities()
+        strategies = query.all()
 
-    return strategies
+        logger.info(f"Found {len(strategies)} strategies for user {current_user.id}")
+
+        # Add follower information for multiple strategies
+        for strategy in strategies:
+            if strategy.strategy_type == StrategyType.MULTIPLE:
+                try:
+                    strategy.follower_account_ids = strategy.get_follower_accounts()
+                    strategy.follower_quantities = strategy.get_follower_quantities()
+                except Exception as e:
+                    logger.error(f"Error getting follower info for strategy {strategy.id}: {e}")
+                    strategy.follower_account_ids = []
+                    strategy.follower_quantities = []
+
+        logger.info(f"Returning {len(strategies)} strategies for user {current_user.id}")
+        return strategies
+    except Exception as e:
+        logger.error(f"Error in list_strategies: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
 
 
 @router.get("/{strategy_id}", response_model=UnifiedStrategyResponse)
