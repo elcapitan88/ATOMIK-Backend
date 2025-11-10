@@ -392,7 +392,7 @@ async def test_no_joins(
         return {"error": str(e)}
 
 
-@router.get("/", response_model=List[UnifiedStrategyResponse])
+@router.get("/")  # REMOVED response_model to test if it's causing the hang
 async def list_strategies(
     execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
     strategy_type: Optional[StrategyType] = Query(None, description="Filter by strategy type"),
@@ -462,7 +462,19 @@ async def list_strategies(
                     strategy.follower_quantities = []
 
         logger.info(f"Returning {len(strategies)} strategies for user {current_user.id}")
-        return strategies
+
+        # TEMPORARY: Return simple list to avoid serialization issues
+        return [
+            {
+                "id": s.id,
+                "ticker": s.ticker,
+                "strategy_type": s.strategy_type.value if s.strategy_type else None,
+                "execution_type": s.execution_type.value if s.execution_type else None,
+                "is_active": s.is_active,
+                "created_at": s.created_at.isoformat() if s.created_at else None
+            }
+            for s in strategies
+        ]
     except Exception as e:
         logger.error(f"Error in list_strategies: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
