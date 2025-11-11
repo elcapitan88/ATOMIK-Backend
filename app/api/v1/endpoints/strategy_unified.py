@@ -392,15 +392,16 @@ async def test_no_joins(
         return {"error": str(e)}
 
 
-@router.get("/")  # REMOVED response_model to test if it's causing the hang
+@router.get("/")
 async def list_strategies(
-    execution_type: Optional[ExecutionType] = Query(None, description="Filter by execution type"),
-    strategy_type: Optional[StrategyType] = Query(None, description="Filter by strategy type"),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    ticker: Optional[str] = Query(None, description="Filter by ticker"),
-    account_id: Optional[str] = Query(None, description="Filter by account"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_user),
+    # MOVED Query params AFTER dependencies to test if order matters
+    execution_type: Optional[str] = Query(None),  # Changed from ExecutionType enum to str
+    strategy_type: Optional[str] = Query(None),   # Changed from StrategyType enum to str
+    is_active: Optional[bool] = Query(None),
+    ticker: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None)
 ):
     """
     List all user strategies with optional filters.
@@ -425,11 +426,19 @@ async def list_strategies(
             ActivatedStrategy.user_id == current_user.id
         )
 
-        # Apply filters
+        # Apply filters (convert strings back to enums if provided)
         if execution_type:
-            query = query.filter(ActivatedStrategy.execution_type == execution_type)
+            try:
+                exec_type_enum = ExecutionType(execution_type)
+                query = query.filter(ActivatedStrategy.execution_type == exec_type_enum)
+            except ValueError:
+                logger.warning(f"Invalid execution_type: {execution_type}")
         if strategy_type:
-            query = query.filter(ActivatedStrategy.strategy_type == strategy_type)
+            try:
+                strat_type_enum = StrategyType(strategy_type)
+                query = query.filter(ActivatedStrategy.strategy_type == strat_type_enum)
+            except ValueError:
+                logger.warning(f"Invalid strategy_type: {strategy_type}")
         if is_active is not None:
             query = query.filter(ActivatedStrategy.is_active == is_active)
         if ticker:
