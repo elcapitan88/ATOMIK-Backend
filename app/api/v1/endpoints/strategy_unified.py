@@ -51,6 +51,45 @@ print(f"DEBUG: strategy_unified.py module loaded", file=sys.stderr, flush=True)
 logger.error("DEBUG: strategy_unified.py module imported")
 
 
+@router.get("/all")  # NEW WORKING ENDPOINT AT /api/v1/strategies/all
+async def list_all_strategies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """Working endpoint at /strategies/all instead of broken root path"""
+    print("DEBUG: /all endpoint hit!", file=sys.stderr, flush=True)
+    logger.error(f"DEBUG: /all endpoint working for user {current_user.id}!")
+
+    try:
+        from app.models.strategy import ActivatedStrategy
+        strategies = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id
+        ).all()
+
+        logger.error(f"DEBUG: Found {len(strategies)} strategies")
+
+        # Return simple list that frontend can use
+        return [
+            {
+                "id": s.id,
+                "ticker": s.ticker,
+                "strategy_type": s.strategy_type.value if s.strategy_type else None,
+                "execution_type": s.execution_type.value if s.execution_type else None,
+                "is_active": s.is_active,
+                "quantity": s.quantity,
+                "account_id": s.account_id,
+                "webhook_id": s.webhook_id,
+                "strategy_code_id": s.strategy_code_id,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "updated_at": s.updated_at.isoformat() if s.updated_at else None
+            }
+            for s in strategies
+        ]
+    except Exception as e:
+        logger.error(f"Error in /all endpoint: {str(e)}", exc_info=True)
+        return {"error": str(e)}
+
+
 @router.get("/debug-test")
 async def debug_test_endpoint():
     """Direct test endpoint with no dependencies"""
