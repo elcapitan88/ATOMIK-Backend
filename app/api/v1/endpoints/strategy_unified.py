@@ -547,18 +547,27 @@ async def list_strategies(
 
         logger.info(f"Returning {len(strategies)} strategies for user {current_user.id}")
 
-        # TEMPORARY: Return simple list to avoid serialization issues
-        return [
-            {
-                "id": s.id,
-                "ticker": s.ticker,
-                "strategy_type": s.strategy_type.value if s.strategy_type else None,
-                "execution_type": s.execution_type.value if s.execution_type else None,
-                "is_active": s.is_active,
-                "created_at": s.created_at.isoformat() if s.created_at else None
-            }
-            for s in strategies
-        ]
+        # Apply enrichment to all strategies
+        enriched_strategies = []
+        for strategy in strategies:
+            try:
+                enriched_data = enrich_strategy_data(strategy, db)
+                enriched_strategies.append(enriched_data)
+            except Exception as e:
+                logger.error(f"Error enriching strategy {strategy.id}: {str(e)}")
+                # Return minimal data if enrichment fails
+                enriched_strategies.append({
+                    "id": strategy.id,
+                    "ticker": strategy.ticker,
+                    "strategy_type": strategy.strategy_type.value if strategy.strategy_type else None,
+                    "execution_type": strategy.execution_type.value if strategy.execution_type else None,
+                    "is_active": strategy.is_active,
+                    "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+                    "name": "Unknown Strategy",
+                    "category": "Unknown"
+                })
+
+        return enriched_strategies
     except Exception as e:
         logger.error(f"Error in list_strategies: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
@@ -869,31 +878,52 @@ async def validate_strategy(
     )
 
 
-@router.get("/my-strategies", response_model=List[UnifiedStrategyResponse])
+@router.get("/my-strategies", response_model=List[Dict[str, Any]])
 async def get_my_strategies(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
     """
-    Get strategies created by the current user.
+    Get strategies created by the current user with full enrichment.
     This endpoint is for backward compatibility with legacy frontend.
+
+    Returns enriched strategy data including:
+    - Strategy names from webhook/strategy_code tables
+    - Broker account details
+    - Performance metrics
+    - Schedule information
     """
-    strategies = db.query(ActivatedStrategy).options(
-        joinedload(ActivatedStrategy.broker_account),
-        joinedload(ActivatedStrategy.leader_broker_account),
-        joinedload(ActivatedStrategy.webhook),
-        joinedload(ActivatedStrategy.strategy_code)
-    ).filter(
-        ActivatedStrategy.user_id == current_user.id
-    ).order_by(ActivatedStrategy.created_at.desc()).all()
+    try:
+        strategies = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id
+        ).order_by(ActivatedStrategy.created_at.desc()).all()
 
-    # Add follower information for multiple strategies
-    for strategy in strategies:
-        if strategy.strategy_type == StrategyType.MULTIPLE:
-            strategy.follower_account_ids = strategy.get_follower_accounts()
-            strategy.follower_quantities = strategy.get_follower_quantities()
+        # Apply enrichment to all strategies
+        enriched_strategies = []
+        for strategy in strategies:
+            try:
+                enriched_data = enrich_strategy_data(strategy, db)
+                enriched_strategies.append(enriched_data)
+            except Exception as e:
+                logger.error(f"Error enriching strategy {strategy.id}: {str(e)}")
+                # Return minimal data if enrichment fails
+                enriched_strategies.append({
+                    "id": strategy.id,
+                    "ticker": strategy.ticker,
+                    "strategy_type": strategy.strategy_type.value if strategy.strategy_type else None,
+                    "execution_type": strategy.execution_type.value if strategy.execution_type else None,
+                    "is_active": strategy.is_active,
+                    "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+                    "name": "Unknown Strategy",
+                    "category": "Unknown"
+                })
 
-    return strategies
+        logger.info(f"Returning {len(enriched_strategies)} enriched strategies for user {current_user.id}")
+        return enriched_strategies
+
+    except Exception as e:
+        logger.error(f"Error in get_my_strategies: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
 
 
 @router.get("/user-activated", response_model=List[Dict[str, Any]])
