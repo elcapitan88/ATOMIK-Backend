@@ -625,7 +625,7 @@ async def list_strategies(
         )
 
 
-@router.get("/user-activated", response_model=Dict[str, Any])
+@router.get("/user-activated", response_model=List[Dict[str, Any]])
 @check_subscription
 async def get_user_activated_strategies(
     db: Session = Depends(get_db),
@@ -635,6 +635,8 @@ async def get_user_activated_strategies(
     Get user's activated strategies - strategies they have subscribed to or activated that are currently trading.
     Returns detailed information including webhook names, follower accounts, performance metrics, etc.
     This replaces the problematic /list endpoint with proper data enrichment.
+
+    NOTE: Returns array directly (not wrapped in object) to match frontend expectations.
     """
     try:
         user_strategies = []
@@ -759,18 +761,15 @@ async def get_user_activated_strategies(
         
         # Sort by most recently triggered/created
         user_strategies.sort(
-            key=lambda x: x.get("last_triggered") or x.get("created_at") or "", 
+            key=lambda x: x.get("last_triggered") or x.get("created_at") or "",
             reverse=True
         )
-        
+
         logger.info(f"Returning {len(user_strategies)} activated strategies for user {current_user.id}")
-        
-        return {
-            "strategies": user_strategies,
-            "total": len(user_strategies),
-            "user_id": current_user.id,
-            "active_count": sum(1 for s in user_strategies if s.get("is_active", False))
-        }
+
+        # Return array directly (not wrapped in object) to match frontend expectations
+        # Frontend expects: [{strategy1}, {strategy2}, ...] and calls .reduce() on it
+        return user_strategies
         
     except Exception as e:
         logger.error(f"Error getting user activated strategies: {str(e)}")
