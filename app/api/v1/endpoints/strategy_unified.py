@@ -269,6 +269,138 @@ def update_follower_quantities(strategy: ActivatedStrategy, quantities: List[int
         )
 
 
+def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
+    """
+    Enrich strategy with webhook/strategy_code data to provide complete information.
+
+    This function looks up the webhook or strategy_code associated with the strategy
+    and adds enriched fields like name, description, category, and additional metadata.
+
+    Ported from legacy strategy.py (lines 699-741) for unified endpoint compatibility.
+    """
+    # Base strategy data
+    enriched = {
+        "id": strategy.id,
+        "user_id": strategy.user_id,
+        "strategy_type": strategy.strategy_type,
+        "execution_type": strategy.execution_type,
+        "ticker": strategy.ticker,
+        "account_id": strategy.account_id,
+        "quantity": strategy.quantity,
+        "is_active": strategy.is_active,
+        "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+        "updated_at": strategy.updated_at.isoformat() if strategy.updated_at else None,
+        "last_triggered": strategy.last_triggered.isoformat() if strategy.last_triggered else None,
+
+        # Performance metrics
+        "total_trades": strategy.total_trades or 0,
+        "successful_trades": strategy.successful_trades or 0,
+        "failed_trades": strategy.failed_trades or 0,
+        "total_pnl": float(strategy.total_pnl) if strategy.total_pnl else 0.0,
+        "win_rate": float(strategy.win_rate) if strategy.win_rate else 0.0,
+
+        # Group/Leader info
+        "leader_account_id": strategy.leader_account_id,
+        "leader_quantity": strategy.leader_quantity,
+        "group_name": strategy.group_name,
+
+        # Default values (will be overwritten by enrichment if available)
+        "name": "Unknown Strategy",
+        "description": "Strategy details unavailable",
+        "category": "Unknown",
+
+        # Schedule fields
+        "market_schedule": strategy.market_schedule,
+        "schedule_active_state": strategy.schedule_active_state,
+        "last_scheduled_toggle": strategy.last_scheduled_toggle.isoformat() if strategy.last_scheduled_toggle else None,
+
+        # Execution source IDs
+        "webhook_id": strategy.webhook_id,
+        "strategy_code_id": strategy.strategy_code_id,
+    }
+
+    # Enrich webhook strategies
+    if strategy.execution_type == ExecutionType.WEBHOOK and strategy.webhook_id:
+        try:
+            # Look up webhook by token (webhook_id is actually the token string)
+            webhook = db.query(Webhook).filter(Webhook.token == str(strategy.webhook_id)).first()
+
+            if webhook:
+                enriched.update({
+                    "name": webhook.name,
+                    "description": webhook.details or f"{webhook.name} trading strategy",
+                    "category": "TradingView Webhook",
+                    "source_type": webhook.source_type,
+                    "webhook_token": webhook.token,
+                    "creator_id": webhook.user_id,
+                    "subscriber_count": webhook.subscriber_count or 0
+                })
+            else:
+                logger.warning(f"Webhook token '{strategy.webhook_id}' not found for strategy {strategy.id}")
+                enriched["name"] = f"Webhook Strategy (Token: {strategy.webhook_id[:8]}...)" if len(str(strategy.webhook_id)) > 8 else f"Webhook Strategy ({strategy.webhook_id})"
+        except Exception as e:
+            logger.error(f"Error looking up webhook for strategy {strategy.id}: {e}")
+            enriched["name"] = "Unknown Webhook Strategy"
+
+    # Enrich engine strategies
+    elif strategy.execution_type == ExecutionType.ENGINE and strategy.strategy_code_id:
+        try:
+            # Use the preloaded relationship instead of making another query
+            strategy_code = strategy.strategy_code
+
+            if strategy_code:
+                enriched.update({
+                    "name": strategy_code.name,
+                    "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
+                    "category": "Strategy Engine",
+                    "source_type": "algorithm",
+                    "symbols": strategy_code.symbols_list if hasattr(strategy_code, 'symbols_list') else [],
+                    "is_validated": strategy_code.is_validated,
+                    "signals_generated": strategy_code.signals_generated if hasattr(strategy_code, 'signals_generated') else 0,
+                    "creator_id": strategy_code.user_id
+                })
+            else:
+                logger.warning(f"Strategy code {strategy.strategy_code_id} not found for strategy {strategy.id}")
+                enriched["name"] = f"Strategy Engine (ID: {strategy.strategy_code_id})"
+        except Exception as e:
+            logger.error(f"Error looking up strategy code for strategy {strategy.id}: {e}")
+            enriched["name"] = "Unknown Engine Strategy"
+
+    # Add broker account info
+    if strategy.broker_account:
+        enriched["broker_account"] = {
+            "account_id": strategy.broker_account.account_id,
+            "name": strategy.broker_account.name,
+            "broker_id": strategy.broker_account.broker_id
+        }
+    else:
+        enriched["broker_account"] = None
+
+    # Handle follower accounts for group strategies
+    if strategy.strategy_type == StrategyType.MULTIPLE:
+        try:
+            follower_accounts = strategy.get_follower_accounts() if hasattr(strategy, 'get_follower_accounts') else []
+            enriched["follower_accounts"] = follower_accounts
+
+            if strategy.leader_broker_account:
+                enriched["leader_broker_account"] = {
+                    "account_id": strategy.leader_broker_account.account_id,
+                    "name": strategy.leader_broker_account.name,
+                    "broker_id": strategy.leader_broker_account.broker_id
+                }
+            else:
+                enriched["leader_broker_account"] = None
+        except Exception as e:
+            logger.error(f"Error getting follower accounts for strategy {strategy.id}: {e}")
+            enriched["follower_accounts"] = []
+            enriched["leader_broker_account"] = None
+    else:
+        enriched["follower_accounts"] = []
+        enriched["leader_broker_account"] = None
+
+    return enriched
+
+
 # API Endpoints
 
 @router.post("/", response_model=UnifiedStrategyResponse)
