@@ -45,28 +45,23 @@ from app.utils.ticker_utils import get_display_ticker, validate_ticker
 router = APIRouter(tags=["unified-strategies"])
 logger = logging.getLogger(__name__)
 
-# Debug: Log when module is imported
-import sys
-print(f"DEBUG: strategy_unified.py module loaded", file=sys.stderr, flush=True)
-logger.error("DEBUG: strategy_unified.py module imported")
-
 
 @router.get("/all")  # NEW WORKING ENDPOINT AT /api/v1/strategies/all
 async def list_all_strategies(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    """Working endpoint at /strategies/all instead of broken root path"""
-    print("DEBUG: /all endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: /all endpoint working for user {current_user.id}!")
-
+    """
+    Working endpoint at /strategies/all instead of broken root path.
+    TODO: Remove this once root path "/" is fixed - see Phase 2.1
+    """
     try:
         from app.models.strategy import ActivatedStrategy
         strategies = db.query(ActivatedStrategy).filter(
             ActivatedStrategy.user_id == current_user.id
         ).all()
 
-        logger.error(f"DEBUG: Found {len(strategies)} strategies")
+        logger.info(f"Found {len(strategies)} strategies for user {current_user.id}")
 
         # Return simple list that frontend can use
         return [
@@ -88,13 +83,6 @@ async def list_all_strategies(
     except Exception as e:
         logger.error(f"Error in /all endpoint: {str(e)}", exc_info=True)
         return {"error": str(e)}
-
-
-@router.get("/debug-test")
-async def debug_test_endpoint():
-    """Direct test endpoint with no dependencies"""
-    print("DEBUG: /debug-test endpoint hit!", file=sys.stderr, flush=True)
-    return {"status": "test endpoint working", "message": "No dependencies"}
 
 
 # Helper Functions
@@ -473,94 +461,6 @@ async def create_strategy(
         logger.error(f"Error creating strategy: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/simple-list")
-async def simple_list_strategies():
-    """Test endpoint with minimal dependencies"""
-    print("DEBUG: /simple-list endpoint hit!", file=sys.stderr, flush=True)
-    return []
-
-
-@router.get("/test-db")
-async def test_db_dependency(db: Session = Depends(get_db)):
-    """Test endpoint with only database dependency"""
-    print("DEBUG: /test-db endpoint hit with db!", file=sys.stderr, flush=True)
-    return {"db": "connected"}
-
-
-@router.get("/test-auth")
-async def test_auth_dependency(current_user=Depends(get_current_user)):
-    """Test endpoint with only auth dependency"""
-    print("DEBUG: /test-auth endpoint hit with user!", file=sys.stderr, flush=True)
-    return {"user_id": current_user.id if current_user else None}
-
-
-@router.get("/test-both")
-async def test_both_dependencies(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """Test endpoint with both dependencies"""
-    print("DEBUG: /test-both endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: test-both - user_id={current_user.id}, db={db is not None}")
-
-    # Try a simple query
-    try:
-        from app.models.strategy import ActivatedStrategy
-        count = db.query(ActivatedStrategy).filter(
-            ActivatedStrategy.user_id == current_user.id
-        ).count()
-        logger.error(f"DEBUG: Found {count} strategies for user {current_user.id}")
-        return {"user_id": current_user.id, "db": "connected", "strategy_count": count}
-    except Exception as e:
-        logger.error(f"DEBUG: Error in test-both: {str(e)}")
-        return {"error": str(e)}
-
-
-@router.get("/test-minimal")
-async def test_minimal_list(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """Test without query parameters"""
-    print("DEBUG: /test-minimal endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: test-minimal - user_id={current_user.id}")
-    return []
-
-
-@router.get("/test-no-joins")
-async def test_no_joins(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """Test without joinedload to see if that's causing the hang"""
-    print("DEBUG: /test-no-joins endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: test-no-joins - user_id={current_user.id}")
-
-    try:
-        # Simple query without any joins
-        from app.models.strategy import ActivatedStrategy
-        strategies = db.query(ActivatedStrategy).filter(
-            ActivatedStrategy.user_id == current_user.id
-        ).all()
-
-        logger.error(f"DEBUG: Found {len(strategies)} strategies without joins")
-
-        # Return simple list of dicts to avoid serialization issues
-        return [
-            {
-                "id": s.id,
-                "ticker": s.ticker,
-                "strategy_type": s.strategy_type,
-                "execution_type": s.execution_type,
-                "is_active": s.is_active
-            }
-            for s in strategies
-        ]
-    except Exception as e:
-        logger.error(f"DEBUG: Error in test-no-joins: {str(e)}", exc_info=True)
-        return {"error": str(e)}
 
 
 @router.get("/")
