@@ -1213,3 +1213,198 @@ async def remove_strategy_schedule(
         "message": "Schedule removed successfully",
         "market_schedule": None
     }
+
+
+@router.post("/{strategy_id}/subscribe")
+@check_subscription
+async def subscribe_to_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Subscribe to an engine strategy.
+
+    This creates a subscription record that allows the user to activate the strategy.
+    Subscriptions are required before activating marketplace strategies.
+
+    Ported from engine_strategies.py (lines 20-89)
+    """
+    try:
+        # Find the engine strategy (StrategyCode)
+        strategy = db.query(StrategyCode).filter(
+            StrategyCode.id == strategy_id,
+            StrategyCode.is_active == True,
+            StrategyCode.is_validated == True
+        ).first()
+
+        if not strategy:
+            raise HTTPException(
+                status_code=404,
+                detail="Engine strategy not found or not available"
+            )
+
+        # Check if already subscribed
+        from sqlalchemy import and_
+        existing_sub = db.query(WebhookSubscription).filter(
+            and_(
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine',
+                WebhookSubscription.strategy_code_id == strategy_id
+            )
+        ).first()
+
+        if existing_sub:
+            return {
+                "message": "Already subscribed to this strategy",
+                "strategy_name": strategy.name,
+                "subscription_id": existing_sub.id
+            }
+
+        # Create new subscription
+        new_subscription = WebhookSubscription(
+            user_id=current_user.id,
+            strategy_type='engine',
+            strategy_id=str(strategy_id),
+            strategy_code_id=strategy_id,
+            subscribed_at=datetime.utcnow()
+        )
+
+        db.add(new_subscription)
+        db.commit()
+        db.refresh(new_subscription)
+
+        logger.info(f"User {current_user.id} subscribed to engine strategy {strategy_id}")
+
+        return {
+            "message": "Successfully subscribed to engine strategy",
+            "strategy_name": strategy.name,
+            "subscription_id": new_subscription.id,
+            "can_activate": True,
+            "activation_url": f"/dashboard/strategies/activate/{strategy_id}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error subscribing to engine strategy: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to subscribe to strategy: {str(e)}"
+        )
+
+
+@router.post("/{strategy_id}/unsubscribe")
+async def unsubscribe_from_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Unsubscribe from an engine strategy.
+
+    This removes the subscription record. If the strategy is currently activated,
+    the user must deactivate it first.
+
+    Ported from engine_strategies.py (lines 92-148)
+    """
+    try:
+        # Find the subscription
+        from sqlalchemy import and_
+        subscription = db.query(WebhookSubscription).filter(
+            and_(
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine',
+                WebhookSubscription.strategy_code_id == strategy_id
+            )
+        ).first()
+
+        if not subscription:
+            raise HTTPException(
+                status_code=404,
+                detail="Subscription not found"
+            )
+
+        # Check if there are active activations
+        active_count = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id,
+            ActivatedStrategy.strategy_code_id == strategy_id,
+            ActivatedStrategy.is_active == True
+        ).count()
+
+        if active_count > 0:
+            return {
+                "message": "Please deactivate the strategy before unsubscribing",
+                "active_activations": active_count,
+                "deactivate_url": "/dashboard/strategies"
+            }
+
+        # Delete subscription
+        db.delete(subscription)
+        db.commit()
+
+        logger.info(f"User {current_user.id} unsubscribed from engine strategy {strategy_id}")
+
+        return {
+            "message": "Successfully unsubscribed from engine strategy"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unsubscribing from engine strategy: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to unsubscribe from strategy: {str(e)}"
+        )
+
+
+@router.get("/subscriptions")
+async def get_strategy_subscriptions(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Get user's engine strategy subscriptions.
+
+    Returns all engine strategies the user is subscribed to, including
+    subscription dates and strategy details.
+
+    Ported from engine_strategies.py (lines 151-190)
+    """
+    try:
+        subscriptions = db.query(WebhookSubscription).filter(
+            WebhookSubscription.user_id == current_user.id,
+            WebhookSubscription.strategy_type == 'engine'
+        ).all()
+
+        result = []
+        for sub in subscriptions:
+            strategy = db.query(StrategyCode).filter(
+                StrategyCode.id == sub.strategy_code_id
+            ).first()
+
+            if strategy:
+                result.append({
+                    "subscription_id": sub.id,
+                    "strategy_id": strategy.id,
+                    "strategy_name": strategy.name,
+                    "description": strategy.description,
+                    "subscribed_at": sub.subscribed_at.isoformat() if sub.subscribed_at else None,
+                    "is_active": strategy.is_active,
+                    "can_activate": True
+                })
+
+        return {
+            "subscriptions": result,
+            "total": len(result)
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching engine subscriptions: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch subscriptions: {str(e)}"
+        )
