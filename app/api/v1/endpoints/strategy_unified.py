@@ -27,6 +27,8 @@ from app.schemas.strategy_unified import (
     StrategyToggleResponse,
     StrategyListFilters,
     StrategyBatchOperation,
+    StrategyScheduleInfo,
+    StrategyScheduleUpdate,
     StrategyType,
     ExecutionType,
     FollowerAccount
@@ -39,8 +41,10 @@ from app.schemas.strategy import (
     EngineStrategyUpdate
 )
 from app.services.subscription_service import SubscriptionService
+from app.services.strategy_service import StrategyProcessor
 from app.core.permissions import check_subscription, check_resource_limit
 from app.utils.ticker_utils import get_display_ticker, validate_ticker
+from app.core.market_hours import is_market_open, get_market_info, get_next_market_event
 
 router = APIRouter(tags=["unified-strategies"])
 logger = logging.getLogger(__name__)
@@ -1015,3 +1019,197 @@ async def batch_operation(
         logger.error(f"Error in batch operation: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{strategy_id}/execute")
+@check_subscription
+async def execute_strategy_manually(
+    strategy_id: int,
+    action_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Execute a strategy manually from the UI.
+
+    This allows users to manually trigger a strategy execution with a specific action
+    (BUY or SELL) without waiting for webhook/engine signals.
+
+    Ported from legacy strategy.py (lines 49-84)
+    """
+    try:
+        # Verify user owns the strategy
+        strategy = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.id == strategy_id,
+            ActivatedStrategy.user_id == current_user.id
+        ).first()
+
+        if not strategy:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # Create signal data from action
+        signal_data = {
+            "action": action_data.get("action"),
+            "order_type": action_data.get("order_type", "MARKET"),
+            "time_in_force": action_data.get("time_in_force", "GTC")
+        }
+
+        if not signal_data["action"]:
+            raise HTTPException(status_code=400, detail="action field is required")
+
+        # Use existing strategy processor to execute
+        strategy_processor = StrategyProcessor(db)
+        result = await strategy_processor.execute_strategy(strategy, signal_data)
+
+        logger.info(f"Manual execution completed for strategy {strategy_id}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Manual strategy execution error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute strategy: {str(e)}"
+        )
+
+
+@router.get("/{strategy_id}/schedule", response_model=StrategyScheduleInfo)
+async def get_strategy_schedule(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Get schedule information for a strategy.
+
+    Returns market schedule details including:
+    - Whether scheduling is enabled
+    - Market hours configuration (NYSE, LONDON, ASIA, 24/7)
+    - Current market status
+    - Next schedule event (open/close)
+    - Last auto-toggle time
+
+    Ported from legacy strategy.py (lines 1564-1595)
+    """
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    # No schedule configured - always-on
+    if not strategy.market_schedule:
+        return StrategyScheduleInfo(
+            scheduled=False,
+            market=None,
+            market_info=None,
+            next_event=None,
+            last_scheduled_toggle=None,
+            manual_override=False
+        )
+
+    # Get market information
+    market_info = get_market_info(strategy.market_schedule)
+    next_event = get_next_market_event(strategy.market_schedule)
+
+    return StrategyScheduleInfo(
+        scheduled=True,
+        market=strategy.market_schedule,
+        market_info=market_info,
+        next_event=next_event,
+        last_scheduled_toggle=strategy.last_scheduled_toggle,
+        manual_override=strategy.schedule_active_state is None
+    )
+
+
+@router.put("/{strategy_id}/schedule")
+async def update_strategy_schedule(
+    strategy_id: int,
+    schedule_data: StrategyScheduleUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Update schedule settings for a strategy.
+
+    Allows setting market hours-based activation:
+    - NYSE: US market hours
+    - LONDON: London market hours
+    - ASIA: Asian market hours
+    - 24/7: Always on
+    - None: No scheduling (always on)
+
+    When schedule is set, strategy will auto-activate/deactivate based on market hours.
+
+    Ported from legacy strategy.py (lines 1598-1638)
+    """
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    market_schedule = schedule_data.market_schedule
+
+    # Validation already handled by Pydantic schema
+    strategy.market_schedule = market_schedule
+
+    # Reset schedule state when schedule changes
+    if market_schedule and market_schedule != ['24/7']:
+        # Check if any of the markets are currently open
+        strategy.schedule_active_state = any(is_market_open(m) for m in market_schedule)
+    else:
+        strategy.schedule_active_state = None
+
+    db.commit()
+    db.refresh(strategy)
+
+    logger.info(f"Strategy {strategy_id} schedule updated to {market_schedule}")
+
+    return {
+        "message": "Schedule updated successfully",
+        "market_schedule": market_schedule,
+        "schedule_active_state": strategy.schedule_active_state
+    }
+
+
+@router.delete("/{strategy_id}/schedule")
+async def remove_strategy_schedule(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Remove scheduling from a strategy (make it always-on).
+
+    This disables market hours-based auto-activation and makes the strategy
+    always available for trading based only on its is_active flag.
+
+    Ported from legacy strategy.py (lines 1641-1667)
+    """
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    strategy.market_schedule = None
+    strategy.schedule_active_state = None
+    strategy.last_scheduled_toggle = None
+
+    db.commit()
+
+    logger.info(f"Strategy {strategy_id} schedule removed, now always-on")
+
+    return {
+        "message": "Schedule removed successfully",
+        "market_schedule": None
+    }
