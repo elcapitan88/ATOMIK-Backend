@@ -892,34 +892,57 @@ async def get_my_strategies(
     return strategies
 
 
-@router.get("/user-activated", response_model=List[UnifiedStrategyResponse])
+@router.get("/user-activated", response_model=List[Dict[str, Any]])
 async def get_user_activated_strategies(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
     """
-    Get all strategies activated by the current user.
-    This includes both strategies created by the user and strategies they're subscribed to.
-    This endpoint is for backward compatibility with legacy frontend.
+    Get ALL strategies activated by the current user (both active and inactive).
+
+    Returns enriched strategy data including:
+    - Strategy names (from webhook/strategy_code lookups)
+    - Categories, descriptions
+    - Broker account details
+    - Performance metrics
+    - Schedule information
+
+    This provides 100% feature parity with legacy endpoint.
     """
-    # Get all strategies for the user (both created and subscribed)
-    strategies = db.query(ActivatedStrategy).options(
-        joinedload(ActivatedStrategy.broker_account),
-        joinedload(ActivatedStrategy.leader_broker_account),
-        joinedload(ActivatedStrategy.webhook),
-        joinedload(ActivatedStrategy.strategy_code)
-    ).filter(
-        ActivatedStrategy.user_id == current_user.id,
-        ActivatedStrategy.is_active == True
-    ).order_by(ActivatedStrategy.created_at.desc()).all()
+    try:
+        # Get ALL strategies for the user (removed is_active filter)
+        strategies = db.query(ActivatedStrategy).options(
+            joinedload(ActivatedStrategy.broker_account),
+            joinedload(ActivatedStrategy.leader_broker_account),
+            joinedload(ActivatedStrategy.webhook),
+            joinedload(ActivatedStrategy.strategy_code)
+        ).filter(
+            ActivatedStrategy.user_id == current_user.id
+            # REMOVED: ActivatedStrategy.is_active == True
+        ).all()
 
-    # Add follower information for multiple strategies
-    for strategy in strategies:
-        if strategy.strategy_type == StrategyType.MULTIPLE:
-            strategy.follower_account_ids = strategy.get_follower_accounts()
-            strategy.follower_quantities = strategy.get_follower_quantities()
+        # Enrich all strategies with webhook/strategy_code data
+        enriched_strategies = []
+        for strategy in strategies:
+            enriched = enrich_strategy_data(strategy, db)
+            enriched_strategies.append(enriched)
 
-    return strategies
+        # Sort by most recently triggered/created (same as legacy)
+        enriched_strategies.sort(
+            key=lambda x: x.get("last_triggered") or x.get("created_at") or "",
+            reverse=True
+        )
+
+        logger.info(f"Returning {len(enriched_strategies)} activated strategies for user {current_user.id}")
+
+        return enriched_strategies
+
+    except Exception as e:
+        logger.error(f"Error getting user activated strategies: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch user activated strategies: {str(e)}"
+        )
 
 
 @router.post("/batch", response_model=Dict[str, Any])
