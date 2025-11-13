@@ -8,7 +8,7 @@ logger.info("Starting API router imports...")
 
 try:
     from .endpoints import auth, broker, subscription, webhooks, tradovate, binance, futures_contracts
-    from .endpoints import strategy_monetization, creator_analytics, strategy_execution, strategy_codes
+    from .endpoints import strategy_monetization, creator_analytics, strategy_execution, strategy_codes, strategy_codes_marketplace
     from .endpoints import strategy_unified
 
     logger.info("Basic endpoints imported successfully (including unified strategy endpoints)")
@@ -45,6 +45,7 @@ api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"]
 logger.info("Registering unified strategy endpoints")
 api_router.include_router(strategy_unified.router, prefix="/strategies", tags=["strategies"])
 api_router.include_router(strategy_codes.router, prefix="/strategies/codes", tags=["strategy-codes"])
+api_router.include_router(strategy_codes_marketplace.router, prefix="/strategies/codes", tags=["strategy-codes-marketplace"])
 logger.info("Strategy endpoints registered successfully")
 
 api_router.include_router(strategy_execution.router, prefix="/trades", tags=["strategy-execution"])
