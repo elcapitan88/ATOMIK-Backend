@@ -137,7 +137,7 @@ class UnifiedStrategyUpdate(BaseModel):
 
 
 class UnifiedStrategyResponse(UnifiedStrategyBase):
-    """Schema for strategy responses"""
+    """Schema for strategy responses with full enrichment"""
 
     # Identity fields
     id: int
@@ -163,11 +163,47 @@ class UnifiedStrategyResponse(UnifiedStrategyBase):
     updated_at: Optional[datetime]
     last_triggered: Optional[datetime]
 
-    # Performance stats (optional, can be expanded)
+    # ============================================================================
+    # ENRICHED FIELDS (from webhook/strategy_code lookups)
+    # ============================================================================
+
+    # Strategy identification (enriched from webhook or strategy_code)
+    name: Optional[str] = None  # Strategy name
+    category: Optional[str] = None  # "TradingView Webhook", "Strategy Engine", "Unknown"
+
+    # Webhook enrichment fields
+    source_type: Optional[str] = None  # webhook.source_type
+    webhook_token: Optional[str] = None  # webhook.token
+    creator_id: Optional[int] = None  # webhook.user_id or strategy_code.user_id
+    subscriber_count: Optional[int] = None  # webhook.subscriber_count
+
+    # Engine strategy enrichment fields
+    symbols: Optional[List[str]] = None  # strategy_code.symbols_list
+    is_validated: Optional[bool] = None  # strategy_code.is_validated
+    signals_generated: Optional[int] = None  # strategy_code.signals_generated
+
+    # Nested broker account objects (enriched)
+    broker_account: Optional[Dict[str, Any]] = None  # {account_id, name, broker_id}
+    leader_broker_account: Optional[Dict[str, Any]] = None  # For multiple strategies
+    follower_accounts: Optional[List[Dict[str, Any]]] = None  # Full follower details
+
+    # Schedule management fields
+    schedule_active_state: Optional[bool] = None  # Current schedule state
+    last_scheduled_toggle: Optional[datetime] = None  # Last auto-toggle time
+
+    # ============================================================================
+    # PERFORMANCE METRICS (expanded)
+    # ============================================================================
+
     total_trades: Optional[int] = 0
     successful_trades: Optional[int] = 0
     failed_trades: Optional[int] = 0
-    win_rate: Optional[float] = None
+    total_pnl: Optional[float] = 0.0  # Total profit/loss
+    win_rate: Optional[float] = None  # Win rate percentage
+    max_drawdown: Optional[float] = None  # Maximum drawdown
+    sharpe_ratio: Optional[float] = None  # Risk-adjusted return
+    average_win: Optional[float] = None  # Average winning trade
+    average_loss: Optional[float] = None  # Average losing trade
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -249,3 +285,46 @@ class StrategyBatchOperation(BaseModel):
         if v not in allowed:
             raise ValueError(f"Operation must be one of: {', '.join(allowed)}")
         return v
+
+
+class StrategyScheduleInfo(BaseModel):
+    """Schema for strategy schedule information"""
+    scheduled: bool
+    market: Optional[List[str]]
+    market_info: Optional[Dict[str, Any]] = None
+    next_event: Optional[Dict[str, Any]] = None
+    last_scheduled_toggle: Optional[datetime] = None
+    manual_override: bool
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "scheduled": True,
+                "market": ["NYSE"],
+                "market_info": {"is_open": True, "next_close": "16:00"},
+                "next_event": {"event": "close", "time": "16:00"},
+                "last_scheduled_toggle": "2025-01-01T09:30:00",
+                "manual_override": False
+            }
+        }
+
+
+class StrategyScheduleUpdate(BaseModel):
+    """Schema for updating strategy schedule"""
+    market_schedule: Optional[List[str]] = Field(None, description="Market schedule: NYSE, LONDON, ASIA, 24/7, or None")
+
+    @field_validator('market_schedule')
+    def validate_market_schedule(cls, v):
+        if v is not None:
+            valid_markets = ['NYSE', 'LONDON', 'ASIA', '24/7']
+            for market in v:
+                if market not in valid_markets:
+                    raise ValueError(f"Invalid market: {market}. Must be one of: {', '.join(valid_markets)}")
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "market_schedule": ["NYSE", "LONDON"]
+            }
+        }

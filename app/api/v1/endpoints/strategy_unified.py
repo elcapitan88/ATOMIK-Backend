@@ -27,6 +27,8 @@ from app.schemas.strategy_unified import (
     StrategyToggleResponse,
     StrategyListFilters,
     StrategyBatchOperation,
+    StrategyScheduleInfo,
+    StrategyScheduleUpdate,
     StrategyType,
     ExecutionType,
     FollowerAccount
@@ -39,16 +41,13 @@ from app.schemas.strategy import (
     EngineStrategyUpdate
 )
 from app.services.subscription_service import SubscriptionService
+from app.services.strategy_service import StrategyProcessor
 from app.core.permissions import check_subscription, check_resource_limit
 from app.utils.ticker_utils import get_display_ticker, validate_ticker
+from app.core.market_hours import is_market_open, get_market_info, get_next_market_event
 
 router = APIRouter(tags=["unified-strategies"])
 logger = logging.getLogger(__name__)
-
-# Debug: Log when module is imported
-import sys
-print(f"DEBUG: strategy_unified.py module loaded", file=sys.stderr, flush=True)
-logger.error("DEBUG: strategy_unified.py module imported")
 
 
 @router.get("/all")  # NEW WORKING ENDPOINT AT /api/v1/strategies/all
@@ -56,17 +55,17 @@ async def list_all_strategies(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    """Working endpoint at /strategies/all instead of broken root path"""
-    print("DEBUG: /all endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: /all endpoint working for user {current_user.id}!")
-
+    """
+    Working endpoint at /strategies/all instead of broken root path.
+    TODO: Remove this once root path "/" is fixed - see Phase 2.1
+    """
     try:
         from app.models.strategy import ActivatedStrategy
         strategies = db.query(ActivatedStrategy).filter(
             ActivatedStrategy.user_id == current_user.id
         ).all()
 
-        logger.error(f"DEBUG: Found {len(strategies)} strategies")
+        logger.info(f"Found {len(strategies)} strategies for user {current_user.id}")
 
         # Return simple list that frontend can use
         return [
@@ -88,13 +87,6 @@ async def list_all_strategies(
     except Exception as e:
         logger.error(f"Error in /all endpoint: {str(e)}", exc_info=True)
         return {"error": str(e)}
-
-
-@router.get("/debug-test")
-async def debug_test_endpoint():
-    """Direct test endpoint with no dependencies"""
-    print("DEBUG: /debug-test endpoint hit!", file=sys.stderr, flush=True)
-    return {"status": "test endpoint working", "message": "No dependencies"}
 
 
 # Helper Functions
@@ -269,6 +261,138 @@ def update_follower_quantities(strategy: ActivatedStrategy, quantities: List[int
         )
 
 
+def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
+    """
+    Enrich strategy with webhook/strategy_code data to provide complete information.
+
+    This function looks up the webhook or strategy_code associated with the strategy
+    and adds enriched fields like name, description, category, and additional metadata.
+
+    Ported from legacy strategy.py (lines 699-741) for unified endpoint compatibility.
+    """
+    # Base strategy data
+    enriched = {
+        "id": strategy.id,
+        "user_id": strategy.user_id,
+        "strategy_type": strategy.strategy_type,
+        "execution_type": strategy.execution_type,
+        "ticker": strategy.ticker,
+        "account_id": strategy.account_id,
+        "quantity": strategy.quantity,
+        "is_active": strategy.is_active,
+        "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+        "updated_at": strategy.updated_at.isoformat() if strategy.updated_at else None,
+        "last_triggered": strategy.last_triggered.isoformat() if strategy.last_triggered else None,
+
+        # Performance metrics
+        "total_trades": strategy.total_trades or 0,
+        "successful_trades": strategy.successful_trades or 0,
+        "failed_trades": strategy.failed_trades or 0,
+        "total_pnl": float(strategy.total_pnl) if strategy.total_pnl else 0.0,
+        "win_rate": float(strategy.win_rate) if strategy.win_rate else 0.0,
+
+        # Group/Leader info
+        "leader_account_id": strategy.leader_account_id,
+        "leader_quantity": strategy.leader_quantity,
+        "group_name": strategy.group_name,
+
+        # Default values (will be overwritten by enrichment if available)
+        "name": "Unknown Strategy",
+        "description": "Strategy details unavailable",
+        "category": "Unknown",
+
+        # Schedule fields
+        "market_schedule": strategy.market_schedule,
+        "schedule_active_state": strategy.schedule_active_state,
+        "last_scheduled_toggle": strategy.last_scheduled_toggle.isoformat() if strategy.last_scheduled_toggle else None,
+
+        # Execution source IDs
+        "webhook_id": strategy.webhook_id,
+        "strategy_code_id": strategy.strategy_code_id,
+    }
+
+    # Enrich webhook strategies
+    if strategy.execution_type == ExecutionType.WEBHOOK and strategy.webhook_id:
+        try:
+            # Look up webhook by token (webhook_id is actually the token string)
+            webhook = db.query(Webhook).filter(Webhook.token == str(strategy.webhook_id)).first()
+
+            if webhook:
+                enriched.update({
+                    "name": webhook.name,
+                    "description": webhook.details or f"{webhook.name} trading strategy",
+                    "category": "TradingView Webhook",
+                    "source_type": webhook.source_type,
+                    "webhook_token": webhook.token,
+                    "creator_id": webhook.user_id,
+                    "subscriber_count": webhook.subscriber_count or 0
+                })
+            else:
+                logger.warning(f"Webhook token '{strategy.webhook_id}' not found for strategy {strategy.id}")
+                enriched["name"] = f"Webhook Strategy (Token: {strategy.webhook_id[:8]}...)" if len(str(strategy.webhook_id)) > 8 else f"Webhook Strategy ({strategy.webhook_id})"
+        except Exception as e:
+            logger.error(f"Error looking up webhook for strategy {strategy.id}: {e}")
+            enriched["name"] = "Unknown Webhook Strategy"
+
+    # Enrich engine strategies
+    elif strategy.execution_type == ExecutionType.ENGINE and strategy.strategy_code_id:
+        try:
+            # Use the preloaded relationship instead of making another query
+            strategy_code = strategy.strategy_code
+
+            if strategy_code:
+                enriched.update({
+                    "name": strategy_code.name,
+                    "description": strategy_code.description or f"{strategy_code.name} algorithmic trading strategy",
+                    "category": "Strategy Engine",
+                    "source_type": "algorithm",
+                    "symbols": strategy_code.symbols_list if hasattr(strategy_code, 'symbols_list') else [],
+                    "is_validated": strategy_code.is_validated,
+                    "signals_generated": strategy_code.signals_generated if hasattr(strategy_code, 'signals_generated') else 0,
+                    "creator_id": strategy_code.user_id
+                })
+            else:
+                logger.warning(f"Strategy code {strategy.strategy_code_id} not found for strategy {strategy.id}")
+                enriched["name"] = f"Strategy Engine (ID: {strategy.strategy_code_id})"
+        except Exception as e:
+            logger.error(f"Error looking up strategy code for strategy {strategy.id}: {e}")
+            enriched["name"] = "Unknown Engine Strategy"
+
+    # Add broker account info
+    if strategy.broker_account:
+        enriched["broker_account"] = {
+            "account_id": strategy.broker_account.account_id,
+            "name": strategy.broker_account.name,
+            "broker_id": strategy.broker_account.broker_id
+        }
+    else:
+        enriched["broker_account"] = None
+
+    # Handle follower accounts for group strategies
+    if strategy.strategy_type == StrategyType.MULTIPLE:
+        try:
+            follower_accounts = strategy.get_follower_accounts() if hasattr(strategy, 'get_follower_accounts') else []
+            enriched["follower_accounts"] = follower_accounts
+
+            if strategy.leader_broker_account:
+                enriched["leader_broker_account"] = {
+                    "account_id": strategy.leader_broker_account.account_id,
+                    "name": strategy.leader_broker_account.name,
+                    "broker_id": strategy.leader_broker_account.broker_id
+                }
+            else:
+                enriched["leader_broker_account"] = None
+        except Exception as e:
+            logger.error(f"Error getting follower accounts for strategy {strategy.id}: {e}")
+            enriched["follower_accounts"] = []
+            enriched["leader_broker_account"] = None
+    else:
+        enriched["follower_accounts"] = []
+        enriched["leader_broker_account"] = None
+
+    return enriched
+
+
 # API Endpoints
 
 @router.post("/", response_model=UnifiedStrategyResponse)
@@ -341,94 +465,6 @@ async def create_strategy(
         logger.error(f"Error creating strategy: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/simple-list")
-async def simple_list_strategies():
-    """Test endpoint with minimal dependencies"""
-    print("DEBUG: /simple-list endpoint hit!", file=sys.stderr, flush=True)
-    return []
-
-
-@router.get("/test-db")
-async def test_db_dependency(db: Session = Depends(get_db)):
-    """Test endpoint with only database dependency"""
-    print("DEBUG: /test-db endpoint hit with db!", file=sys.stderr, flush=True)
-    return {"db": "connected"}
-
-
-@router.get("/test-auth")
-async def test_auth_dependency(current_user=Depends(get_current_user)):
-    """Test endpoint with only auth dependency"""
-    print("DEBUG: /test-auth endpoint hit with user!", file=sys.stderr, flush=True)
-    return {"user_id": current_user.id if current_user else None}
-
-
-@router.get("/test-both")
-async def test_both_dependencies(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """Test endpoint with both dependencies"""
-    print("DEBUG: /test-both endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: test-both - user_id={current_user.id}, db={db is not None}")
-
-    # Try a simple query
-    try:
-        from app.models.strategy import ActivatedStrategy
-        count = db.query(ActivatedStrategy).filter(
-            ActivatedStrategy.user_id == current_user.id
-        ).count()
-        logger.error(f"DEBUG: Found {count} strategies for user {current_user.id}")
-        return {"user_id": current_user.id, "db": "connected", "strategy_count": count}
-    except Exception as e:
-        logger.error(f"DEBUG: Error in test-both: {str(e)}")
-        return {"error": str(e)}
-
-
-@router.get("/test-minimal")
-async def test_minimal_list(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """Test without query parameters"""
-    print("DEBUG: /test-minimal endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: test-minimal - user_id={current_user.id}")
-    return []
-
-
-@router.get("/test-no-joins")
-async def test_no_joins(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """Test without joinedload to see if that's causing the hang"""
-    print("DEBUG: /test-no-joins endpoint hit!", file=sys.stderr, flush=True)
-    logger.error(f"DEBUG: test-no-joins - user_id={current_user.id}")
-
-    try:
-        # Simple query without any joins
-        from app.models.strategy import ActivatedStrategy
-        strategies = db.query(ActivatedStrategy).filter(
-            ActivatedStrategy.user_id == current_user.id
-        ).all()
-
-        logger.error(f"DEBUG: Found {len(strategies)} strategies without joins")
-
-        # Return simple list of dicts to avoid serialization issues
-        return [
-            {
-                "id": s.id,
-                "ticker": s.ticker,
-                "strategy_type": s.strategy_type,
-                "execution_type": s.execution_type,
-                "is_active": s.is_active
-            }
-            for s in strategies
-        ]
-    except Exception as e:
-        logger.error(f"DEBUG: Error in test-no-joins: {str(e)}", exc_info=True)
-        return {"error": str(e)}
 
 
 @router.get("/")
@@ -511,18 +547,27 @@ async def list_strategies(
 
         logger.info(f"Returning {len(strategies)} strategies for user {current_user.id}")
 
-        # TEMPORARY: Return simple list to avoid serialization issues
-        return [
-            {
-                "id": s.id,
-                "ticker": s.ticker,
-                "strategy_type": s.strategy_type.value if s.strategy_type else None,
-                "execution_type": s.execution_type.value if s.execution_type else None,
-                "is_active": s.is_active,
-                "created_at": s.created_at.isoformat() if s.created_at else None
-            }
-            for s in strategies
-        ]
+        # Apply enrichment to all strategies
+        enriched_strategies = []
+        for strategy in strategies:
+            try:
+                enriched_data = enrich_strategy_data(strategy, db)
+                enriched_strategies.append(enriched_data)
+            except Exception as e:
+                logger.error(f"Error enriching strategy {strategy.id}: {str(e)}")
+                # Return minimal data if enrichment fails
+                enriched_strategies.append({
+                    "id": strategy.id,
+                    "ticker": strategy.ticker,
+                    "strategy_type": strategy.strategy_type.value if strategy.strategy_type else None,
+                    "execution_type": strategy.execution_type.value if strategy.execution_type else None,
+                    "is_active": strategy.is_active,
+                    "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+                    "name": "Unknown Strategy",
+                    "category": "Unknown"
+                })
+
+        return enriched_strategies
     except Exception as e:
         logger.error(f"Error in list_strategies: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
@@ -833,61 +878,105 @@ async def validate_strategy(
     )
 
 
-@router.get("/my-strategies", response_model=List[UnifiedStrategyResponse])
+@router.get("/my-strategies", response_model=List[Dict[str, Any]])
 async def get_my_strategies(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
     """
-    Get strategies created by the current user.
+    Get strategies created by the current user with full enrichment.
     This endpoint is for backward compatibility with legacy frontend.
+
+    Returns enriched strategy data including:
+    - Strategy names from webhook/strategy_code tables
+    - Broker account details
+    - Performance metrics
+    - Schedule information
     """
-    strategies = db.query(ActivatedStrategy).options(
-        joinedload(ActivatedStrategy.broker_account),
-        joinedload(ActivatedStrategy.leader_broker_account),
-        joinedload(ActivatedStrategy.webhook),
-        joinedload(ActivatedStrategy.strategy_code)
-    ).filter(
-        ActivatedStrategy.user_id == current_user.id
-    ).order_by(ActivatedStrategy.created_at.desc()).all()
+    try:
+        strategies = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id
+        ).order_by(ActivatedStrategy.created_at.desc()).all()
 
-    # Add follower information for multiple strategies
-    for strategy in strategies:
-        if strategy.strategy_type == StrategyType.MULTIPLE:
-            strategy.follower_account_ids = strategy.get_follower_accounts()
-            strategy.follower_quantities = strategy.get_follower_quantities()
+        # Apply enrichment to all strategies
+        enriched_strategies = []
+        for strategy in strategies:
+            try:
+                enriched_data = enrich_strategy_data(strategy, db)
+                enriched_strategies.append(enriched_data)
+            except Exception as e:
+                logger.error(f"Error enriching strategy {strategy.id}: {str(e)}")
+                # Return minimal data if enrichment fails
+                enriched_strategies.append({
+                    "id": strategy.id,
+                    "ticker": strategy.ticker,
+                    "strategy_type": strategy.strategy_type.value if strategy.strategy_type else None,
+                    "execution_type": strategy.execution_type.value if strategy.execution_type else None,
+                    "is_active": strategy.is_active,
+                    "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+                    "name": "Unknown Strategy",
+                    "category": "Unknown"
+                })
 
-    return strategies
+        logger.info(f"Returning {len(enriched_strategies)} enriched strategies for user {current_user.id}")
+        return enriched_strategies
+
+    except Exception as e:
+        logger.error(f"Error in get_my_strategies: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
 
 
-@router.get("/user-activated", response_model=List[UnifiedStrategyResponse])
+@router.get("/user-activated", response_model=List[Dict[str, Any]])
 async def get_user_activated_strategies(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
     """
-    Get all strategies activated by the current user.
-    This includes both strategies created by the user and strategies they're subscribed to.
-    This endpoint is for backward compatibility with legacy frontend.
+    Get ALL strategies activated by the current user (both active and inactive).
+
+    Returns enriched strategy data including:
+    - Strategy names (from webhook/strategy_code lookups)
+    - Categories, descriptions
+    - Broker account details
+    - Performance metrics
+    - Schedule information
+
+    This provides 100% feature parity with legacy endpoint.
     """
-    # Get all strategies for the user (both created and subscribed)
-    strategies = db.query(ActivatedStrategy).options(
-        joinedload(ActivatedStrategy.broker_account),
-        joinedload(ActivatedStrategy.leader_broker_account),
-        joinedload(ActivatedStrategy.webhook),
-        joinedload(ActivatedStrategy.strategy_code)
-    ).filter(
-        ActivatedStrategy.user_id == current_user.id,
-        ActivatedStrategy.is_active == True
-    ).order_by(ActivatedStrategy.created_at.desc()).all()
+    try:
+        # Get ALL strategies for the user (removed is_active filter)
+        strategies = db.query(ActivatedStrategy).options(
+            joinedload(ActivatedStrategy.broker_account),
+            joinedload(ActivatedStrategy.leader_broker_account),
+            joinedload(ActivatedStrategy.webhook),
+            joinedload(ActivatedStrategy.strategy_code)
+        ).filter(
+            ActivatedStrategy.user_id == current_user.id
+            # REMOVED: ActivatedStrategy.is_active == True
+        ).all()
 
-    # Add follower information for multiple strategies
-    for strategy in strategies:
-        if strategy.strategy_type == StrategyType.MULTIPLE:
-            strategy.follower_account_ids = strategy.get_follower_accounts()
-            strategy.follower_quantities = strategy.get_follower_quantities()
+        # Enrich all strategies with webhook/strategy_code data
+        enriched_strategies = []
+        for strategy in strategies:
+            enriched = enrich_strategy_data(strategy, db)
+            enriched_strategies.append(enriched)
 
-    return strategies
+        # Sort by most recently triggered/created (same as legacy)
+        enriched_strategies.sort(
+            key=lambda x: x.get("last_triggered") or x.get("created_at") or "",
+            reverse=True
+        )
+
+        logger.info(f"Returning {len(enriched_strategies)} activated strategies for user {current_user.id}")
+
+        return enriched_strategies
+
+    except Exception as e:
+        logger.error(f"Error getting user activated strategies: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch user activated strategies: {str(e)}"
+        )
 
 
 @router.post("/batch", response_model=Dict[str, Any])
@@ -962,142 +1051,390 @@ async def batch_operation(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Legacy endpoint mappings for backward compatibility
-
-@router.post("/activate", response_model=UnifiedStrategyResponse)
+@router.post("/{strategy_id}/execute")
 @check_subscription
-@check_resource_limit("active_strategies")
-async def activate_strategy(
-    strategy_data: Union[SingleStrategyCreate, MultipleStrategyCreate],
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """
-    Legacy endpoint for activating a webhook strategy.
-    Maps to the unified create_strategy endpoint.
-    """
-    # Convert legacy format to unified format
-    unified_data = UnifiedStrategyCreate(
-        strategy_type=strategy_data.strategy_type,
-        execution_type=ExecutionType.WEBHOOK,
-        webhook_id=strategy_data.webhook_id,
-        ticker=strategy_data.ticker,
-        is_active=True,
-        account_id=getattr(strategy_data, 'account_id', None),
-        quantity=getattr(strategy_data, 'quantity', None),
-        leader_account_id=getattr(strategy_data, 'leader_account_id', None),
-        leader_quantity=getattr(strategy_data, 'leader_quantity', None),
-        follower_accounts=[
-            FollowerAccount(account_id=acc_id, quantity=qty)
-            for acc_id, qty in zip(
-                getattr(strategy_data, 'follower_account_ids', []) or [],
-                getattr(strategy_data, 'follower_quantities', []) or []
-            )
-        ] if hasattr(strategy_data, 'follower_account_ids') else None
-    )
-
-    return await create_strategy(unified_data, db, current_user)
-
-
-@router.get("/list", response_model=List[UnifiedStrategyResponse])
-async def list_strategies_legacy(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """
-    Legacy endpoint for listing webhook strategies.
-    Maps to the unified list_strategies endpoint with webhook filter.
-    """
-    return await list_strategies(
-        execution_type=ExecutionType.WEBHOOK,
-        db=db,
-        current_user=current_user
-    )
-
-
-@router.post("/engine/configure", response_model=UnifiedStrategyResponse)
-@check_subscription
-@check_resource_limit("active_strategies")
-async def configure_engine_strategy(
-    strategy_data: EngineStrategyCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """
-    Legacy endpoint for configuring an engine strategy.
-    Maps to the unified create_strategy endpoint.
-    """
-    # Convert legacy format to unified format
-    unified_data = UnifiedStrategyCreate(
-        strategy_type=strategy_data.strategy_type,
-        execution_type=ExecutionType.ENGINE,
-        strategy_code_id=strategy_data.strategy_code_id,
-        ticker=strategy_data.ticker,
-        is_active=getattr(strategy_data, 'is_active', True),
-        account_id=getattr(strategy_data, 'account_id', None),
-        quantity=getattr(strategy_data, 'quantity', None),
-        leader_account_id=getattr(strategy_data, 'leader_account_id', None),
-        leader_quantity=getattr(strategy_data, 'leader_quantity', None),
-        follower_accounts=[
-            FollowerAccount(account_id=acc_id, quantity=qty)
-            for acc_id, qty in zip(
-                getattr(strategy_data, 'follower_account_ids', []) or [],
-                getattr(strategy_data, 'follower_quantities', []) or []
-            )
-        ] if hasattr(strategy_data, 'follower_account_ids') else None
-    )
-
-    return await create_strategy(unified_data, db, current_user)
-
-
-@router.get("/engine/list", response_model=List[UnifiedStrategyResponse])
-async def list_engine_strategies(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    """
-    Legacy endpoint for listing engine strategies.
-    Maps to the unified list_strategies endpoint with engine filter.
-    """
-    return await list_strategies(
-        execution_type=ExecutionType.ENGINE,
-        db=db,
-        current_user=current_user
-    )
-
-
-@router.put("/engine/{strategy_id}", response_model=UnifiedStrategyResponse)
-@check_subscription
-async def update_engine_strategy(
+async def execute_strategy_manually(
     strategy_id: int,
-    updates: EngineStrategyUpdate,
+    action_data: Dict[str, Any],
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
     """
-    Legacy endpoint for updating an engine strategy.
-    Maps to the unified update_strategy endpoint.
+    Execute a strategy manually from the UI.
+
+    This allows users to manually trigger a strategy execution with a specific action
+    (BUY or SELL) without waiting for webhook/engine signals.
+
+    Ported from legacy strategy.py (lines 49-84)
     """
-    # Convert legacy format to unified format
-    unified_updates = UnifiedStrategyUpdate(
-        is_active=updates.is_active if hasattr(updates, 'is_active') else None,
-        quantity=updates.quantity if hasattr(updates, 'quantity') else None,
-        leader_quantity=updates.leader_quantity if hasattr(updates, 'leader_quantity') else None,
-        follower_quantities=updates.follower_quantities if hasattr(updates, 'follower_quantities') else None,
-        description=updates.description if hasattr(updates, 'description') else None
-    )
+    try:
+        # Verify user owns the strategy
+        strategy = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.id == strategy_id,
+            ActivatedStrategy.user_id == current_user.id
+        ).first()
 
-    return await update_strategy(strategy_id, unified_updates, db, current_user)
+        if not strategy:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # Create signal data from action
+        signal_data = {
+            "action": action_data.get("action"),
+            "order_type": action_data.get("order_type", "MARKET"),
+            "time_in_force": action_data.get("time_in_force", "GTC")
+        }
+
+        if not signal_data["action"]:
+            raise HTTPException(status_code=400, detail="action field is required")
+
+        # Use existing strategy processor to execute
+        strategy_processor = StrategyProcessor(db)
+        result = await strategy_processor.execute_strategy(strategy, signal_data)
+
+        logger.info(f"Manual execution completed for strategy {strategy_id}")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Manual strategy execution error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to execute strategy: {str(e)}"
+        )
 
 
-@router.delete("/engine/{strategy_id}")
-async def delete_engine_strategy(
+@router.get("/{strategy_id}/schedule", response_model=StrategyScheduleInfo)
+async def get_strategy_schedule(
     strategy_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
     """
-    Legacy endpoint for deleting an engine strategy.
-    Maps to the unified delete_strategy endpoint.
+    Get schedule information for a strategy.
+
+    Returns market schedule details including:
+    - Whether scheduling is enabled
+    - Market hours configuration (NYSE, LONDON, ASIA, 24/7)
+    - Current market status
+    - Next schedule event (open/close)
+    - Last auto-toggle time
+
+    Ported from legacy strategy.py (lines 1564-1595)
     """
-    return await delete_strategy(strategy_id, db, current_user)
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    # No schedule configured - always-on
+    if not strategy.market_schedule:
+        return StrategyScheduleInfo(
+            scheduled=False,
+            market=None,
+            market_info=None,
+            next_event=None,
+            last_scheduled_toggle=None,
+            manual_override=False
+        )
+
+    # Get market information
+    market_info = get_market_info(strategy.market_schedule)
+    next_event = get_next_market_event(strategy.market_schedule)
+
+    return StrategyScheduleInfo(
+        scheduled=True,
+        market=strategy.market_schedule,
+        market_info=market_info,
+        next_event=next_event,
+        last_scheduled_toggle=strategy.last_scheduled_toggle,
+        manual_override=strategy.schedule_active_state is None
+    )
+
+
+@router.put("/{strategy_id}/schedule")
+async def update_strategy_schedule(
+    strategy_id: int,
+    schedule_data: StrategyScheduleUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Update schedule settings for a strategy.
+
+    Allows setting market hours-based activation:
+    - NYSE: US market hours
+    - LONDON: London market hours
+    - ASIA: Asian market hours
+    - 24/7: Always on
+    - None: No scheduling (always on)
+
+    When schedule is set, strategy will auto-activate/deactivate based on market hours.
+
+    Ported from legacy strategy.py (lines 1598-1638)
+    """
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    market_schedule = schedule_data.market_schedule
+
+    # Validation already handled by Pydantic schema
+    strategy.market_schedule = market_schedule
+
+    # Reset schedule state when schedule changes
+    if market_schedule and market_schedule != ['24/7']:
+        # Check if any of the markets are currently open
+        strategy.schedule_active_state = any(is_market_open(m) for m in market_schedule)
+    else:
+        strategy.schedule_active_state = None
+
+    db.commit()
+    db.refresh(strategy)
+
+    logger.info(f"Strategy {strategy_id} schedule updated to {market_schedule}")
+
+    return {
+        "message": "Schedule updated successfully",
+        "market_schedule": market_schedule,
+        "schedule_active_state": strategy.schedule_active_state
+    }
+
+
+@router.delete("/{strategy_id}/schedule")
+async def remove_strategy_schedule(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Remove scheduling from a strategy (make it always-on).
+
+    This disables market hours-based auto-activation and makes the strategy
+    always available for trading based only on its is_active flag.
+
+    Ported from legacy strategy.py (lines 1641-1667)
+    """
+    strategy = db.query(ActivatedStrategy).filter(
+        ActivatedStrategy.id == strategy_id,
+        ActivatedStrategy.user_id == current_user.id
+    ).first()
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    strategy.market_schedule = None
+    strategy.schedule_active_state = None
+    strategy.last_scheduled_toggle = None
+
+    db.commit()
+
+    logger.info(f"Strategy {strategy_id} schedule removed, now always-on")
+
+    return {
+        "message": "Schedule removed successfully",
+        "market_schedule": None
+    }
+
+
+@router.post("/{strategy_id}/subscribe")
+@check_subscription
+async def subscribe_to_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Subscribe to an engine strategy.
+
+    This creates a subscription record that allows the user to activate the strategy.
+    Subscriptions are required before activating marketplace strategies.
+
+    Ported from engine_strategies.py (lines 20-89)
+    """
+    try:
+        # Find the engine strategy (StrategyCode)
+        strategy = db.query(StrategyCode).filter(
+            StrategyCode.id == strategy_id,
+            StrategyCode.is_active == True,
+            StrategyCode.is_validated == True
+        ).first()
+
+        if not strategy:
+            raise HTTPException(
+                status_code=404,
+                detail="Engine strategy not found or not available"
+            )
+
+        # Check if already subscribed
+        from sqlalchemy import and_
+        existing_sub = db.query(WebhookSubscription).filter(
+            and_(
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine',
+                WebhookSubscription.strategy_code_id == strategy_id
+            )
+        ).first()
+
+        if existing_sub:
+            return {
+                "message": "Already subscribed to this strategy",
+                "strategy_name": strategy.name,
+                "subscription_id": existing_sub.id
+            }
+
+        # Create new subscription
+        new_subscription = WebhookSubscription(
+            user_id=current_user.id,
+            strategy_type='engine',
+            strategy_id=str(strategy_id),
+            strategy_code_id=strategy_id,
+            subscribed_at=datetime.utcnow()
+        )
+
+        db.add(new_subscription)
+        db.commit()
+        db.refresh(new_subscription)
+
+        logger.info(f"User {current_user.id} subscribed to engine strategy {strategy_id}")
+
+        return {
+            "message": "Successfully subscribed to engine strategy",
+            "strategy_name": strategy.name,
+            "subscription_id": new_subscription.id,
+            "can_activate": True,
+            "activation_url": f"/dashboard/strategies/activate/{strategy_id}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error subscribing to engine strategy: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to subscribe to strategy: {str(e)}"
+        )
+
+
+@router.post("/{strategy_id}/unsubscribe")
+async def unsubscribe_from_strategy(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Unsubscribe from an engine strategy.
+
+    This removes the subscription record. If the strategy is currently activated,
+    the user must deactivate it first.
+
+    Ported from engine_strategies.py (lines 92-148)
+    """
+    try:
+        # Find the subscription
+        from sqlalchemy import and_
+        subscription = db.query(WebhookSubscription).filter(
+            and_(
+                WebhookSubscription.user_id == current_user.id,
+                WebhookSubscription.strategy_type == 'engine',
+                WebhookSubscription.strategy_code_id == strategy_id
+            )
+        ).first()
+
+        if not subscription:
+            raise HTTPException(
+                status_code=404,
+                detail="Subscription not found"
+            )
+
+        # Check if there are active activations
+        active_count = db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == current_user.id,
+            ActivatedStrategy.strategy_code_id == strategy_id,
+            ActivatedStrategy.is_active == True
+        ).count()
+
+        if active_count > 0:
+            return {
+                "message": "Please deactivate the strategy before unsubscribing",
+                "active_activations": active_count,
+                "deactivate_url": "/dashboard/strategies"
+            }
+
+        # Delete subscription
+        db.delete(subscription)
+        db.commit()
+
+        logger.info(f"User {current_user.id} unsubscribed from engine strategy {strategy_id}")
+
+        return {
+            "message": "Successfully unsubscribed from engine strategy"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unsubscribing from engine strategy: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to unsubscribe from strategy: {str(e)}"
+        )
+
+
+@router.get("/subscriptions")
+async def get_strategy_subscriptions(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """
+    Get user's engine strategy subscriptions.
+
+    Returns all engine strategies the user is subscribed to, including
+    subscription dates and strategy details.
+
+    Ported from engine_strategies.py (lines 151-190)
+    """
+    try:
+        subscriptions = db.query(WebhookSubscription).filter(
+            WebhookSubscription.user_id == current_user.id,
+            WebhookSubscription.strategy_type == 'engine'
+        ).all()
+
+        result = []
+        for sub in subscriptions:
+            strategy = db.query(StrategyCode).filter(
+                StrategyCode.id == sub.strategy_code_id
+            ).first()
+
+            if strategy:
+                result.append({
+                    "subscription_id": sub.id,
+                    "strategy_id": strategy.id,
+                    "strategy_name": strategy.name,
+                    "description": strategy.description,
+                    "subscribed_at": sub.subscribed_at.isoformat() if sub.subscribed_at else None,
+                    "is_active": strategy.is_active,
+                    "can_activate": True
+                })
+
+        return {
+            "subscriptions": result,
+            "total": len(result)
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching engine subscriptions: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch subscriptions: {str(e)}"
+        )
