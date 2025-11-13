@@ -86,7 +86,7 @@ async def list_all_strategies(
         ]
     except Exception as e:
         logger.error(f"Error in /all endpoint: {str(e)}", exc_info=True)
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
 
 
 # Helper Functions
@@ -467,13 +467,12 @@ async def create_strategy(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/")
+@router.get("/", response_model=List[Dict[str, Any]])
 async def list_strategies(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
-    # MOVED Query params AFTER dependencies to test if order matters
-    execution_type: Optional[str] = Query(None),  # Changed from ExecutionType enum to str
-    strategy_type: Optional[str] = Query(None),   # Changed from StrategyType enum to str
+    execution_type: Optional[str] = Query(None),
+    strategy_type: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     ticker: Optional[str] = Query(None),
     account_id: Optional[str] = Query(None)
