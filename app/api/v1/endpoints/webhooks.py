@@ -290,37 +290,40 @@ async def webhook_endpoint(
             detail=f"Webhook processing failed: {str(e)}"
         )
 
-@router.get("/list", response_model=List[WebhookSecureOut])
+@router.get("/", response_model=List[WebhookSecureOut])
 @check_subscription
-async def list_webhooks(
+async def get_webhooks_root(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    response: Response = None  # Added Response parameter
+    response: Response = None
 ):
-    """List all webhooks for the current user"""
+    """
+    Get all webhooks for the current user (root endpoint).
+    This is the primary endpoint for listing webhooks, matching frontend expectations.
+    """
     webhooks = db.query(Webhook).filter(
         Webhook.user_id == current_user.id
     ).all()
-    
+
     # Add upgrade suggestion if approaching limits
     if not settings.SKIP_SUBSCRIPTION_CHECK:
         subscription = db.query(Subscription).filter(
             Subscription.user_id == current_user.id
         ).first()
-        
+
         if subscription:
             user_tier = subscription.tier
             max_webhooks = float('inf')
-            
+
             if user_tier == "starter":
                 max_webhooks = 1
             elif user_tier == "pro":
                 max_webhooks = 5
-                
+
             # Add upgrade headers if approaching limit
             if len(webhooks) >= max_webhooks - 1 and user_tier != "elite":
                 next_tier = "pro" if user_tier == "starter" else "elite"
-                
+
                 if response:
                     add_upgrade_headers(response, user_tier, UpgradeReason.WEBHOOK_LIMIT)
 
@@ -347,6 +350,21 @@ async def list_webhooks(
             username=current_user.username
         ) for webhook in webhooks
     ]
+
+
+@router.get("/list", response_model=List[WebhookSecureOut])
+@check_subscription
+async def list_webhooks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    response: Response = None  # Added Response parameter
+):
+    """
+    List all webhooks for the current user (legacy endpoint).
+    Kept for backward compatibility. Use GET / instead.
+    """
+    # Call the root endpoint to avoid duplication
+    return await get_webhooks_root(db=db, current_user=current_user, response=response)
 
 
 
