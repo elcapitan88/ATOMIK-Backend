@@ -6,7 +6,7 @@ from . import aria
 from . import binance
 from . import broker
 from . import futures_contracts
-from . import strategy
+# Legacy strategy.py removed - now using strategy_unified.py
 from . import subscriptions as subscription
 from . import tradovate
 from . import webhooks
@@ -19,10 +19,10 @@ from . import marketplace
 __all__ = [
     "auth",
     "aria",
-    "binance", 
+    "binance",
     "broker",
     "futures_contracts",
-    "strategy",
+    # "strategy" removed - using strategy_unified now
     "subscription",
     "tradovate",
     "webhooks",
