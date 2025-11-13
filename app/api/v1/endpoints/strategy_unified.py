@@ -86,7 +86,7 @@ async def list_all_strategies(
         ]
     except Exception as e:
         logger.error(f"Error in /all endpoint: {str(e)}", exc_info=True)
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
 
 
 # Helper Functions
