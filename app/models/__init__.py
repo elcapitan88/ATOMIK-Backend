@@ -2,6 +2,7 @@
 from .user import User
 from .webhook import Webhook, WebhookLog
 from .strategy import ActivatedStrategy
+from .strategy_code import StrategyCode
 from .broker import BrokerAccount, BrokerCredentials
 from .subscription import Subscription
 from .order import Order
@@ -23,6 +24,7 @@ __all__ = [
     "Webhook",
     "WebhookLog",
     "ActivatedStrategy",
+    "StrategyCode",
     "BrokerAccount",
     "BrokerCredentials",
     "Subscription",
