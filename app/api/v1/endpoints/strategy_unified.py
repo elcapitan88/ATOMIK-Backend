@@ -572,6 +572,98 @@ async def list_strategies(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
 
 
+@router.get("/user-activated", response_model=List[Dict[str, Any]])
+async def get_user_activated_strategies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    # Optional query parameters for filtering (frontend compatibility)
+    execution_type: Optional[str] = Query(None),
+    strategy_type: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    ticker: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None)
+):
+    """
+    Get ALL strategies activated by the current user with optional filters.
+
+    Returns enriched strategy data including:
+    - Strategy names (from webhook/strategy_code lookups)
+    - Categories, descriptions
+    - Broker account details
+    - Performance metrics
+    - Schedule information
+
+    Query Parameters:
+    - execution_type: Filter by WEBHOOK or ENGINE
+    - strategy_type: Filter by SINGLE or MULTIPLE
+    - is_active: Filter by active status
+    - ticker: Filter by ticker symbol
+    - account_id: Filter by account
+
+    This provides 100% feature parity with legacy endpoint.
+    """
+    try:
+        # Get strategies for the user with optional filters
+        query = db.query(ActivatedStrategy).options(
+            joinedload(ActivatedStrategy.broker_account),
+            joinedload(ActivatedStrategy.leader_broker_account),
+            joinedload(ActivatedStrategy.webhook),
+            joinedload(ActivatedStrategy.strategy_code)
+        ).filter(
+            ActivatedStrategy.user_id == current_user.id
+        )
+
+        # Apply filters if provided
+        if execution_type:
+            try:
+                exec_type_enum = ExecutionType(execution_type)
+                query = query.filter(ActivatedStrategy.execution_type == exec_type_enum)
+            except ValueError:
+                logger.warning(f"Invalid execution_type: {execution_type}")
+
+        if strategy_type:
+            try:
+                strat_type_enum = StrategyType(strategy_type)
+                query = query.filter(ActivatedStrategy.strategy_type == strat_type_enum)
+            except ValueError:
+                logger.warning(f"Invalid strategy_type: {strategy_type}")
+
+        if is_active is not None:
+            query = query.filter(ActivatedStrategy.is_active == is_active)
+
+        if ticker:
+            query = query.filter(ActivatedStrategy.ticker == ticker)
+
+        if account_id:
+            query = query.filter(
+                (ActivatedStrategy.account_id == account_id) |
+                (ActivatedStrategy.leader_account_id == account_id)
+            )
+
+        strategies = query.all()
+
+        # Enrich all strategies with webhook/strategy_code data
+        enriched_strategies = []
+        for strategy in strategies:
+            enriched = enrich_strategy_data(strategy, db)
+            enriched_strategies.append(enriched)
+
+        # Sort by most recently triggered/created (same as legacy)
+        enriched_strategies.sort(
+            key=lambda x: x.get("last_triggered") or x.get("created_at") or "",
+            reverse=True
+        )
+
+        logger.info(f"Returning {len(enriched_strategies)} activated strategies for user {current_user.id}")
+
+        return enriched_strategies
+
+    except Exception as e:
+        logger.error(f"Error getting user activated strategies: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch user activated strategies: {str(e)}"
+        )
 @router.get("/{strategy_id}", response_model=UnifiedStrategyResponse)
 async def get_strategy(
     strategy_id: int,
@@ -925,98 +1017,6 @@ async def get_my_strategies(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve strategies: {str(e)}")
 
 
-@router.get("/user-activated", response_model=List[Dict[str, Any]])
-async def get_user_activated_strategies(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-    # Optional query parameters for filtering (frontend compatibility)
-    execution_type: Optional[str] = Query(None),
-    strategy_type: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None),
-    ticker: Optional[str] = Query(None),
-    account_id: Optional[str] = Query(None)
-):
-    """
-    Get ALL strategies activated by the current user with optional filters.
-
-    Returns enriched strategy data including:
-    - Strategy names (from webhook/strategy_code lookups)
-    - Categories, descriptions
-    - Broker account details
-    - Performance metrics
-    - Schedule information
-
-    Query Parameters:
-    - execution_type: Filter by WEBHOOK or ENGINE
-    - strategy_type: Filter by SINGLE or MULTIPLE
-    - is_active: Filter by active status
-    - ticker: Filter by ticker symbol
-    - account_id: Filter by account
-
-    This provides 100% feature parity with legacy endpoint.
-    """
-    try:
-        # Get strategies for the user with optional filters
-        query = db.query(ActivatedStrategy).options(
-            joinedload(ActivatedStrategy.broker_account),
-            joinedload(ActivatedStrategy.leader_broker_account),
-            joinedload(ActivatedStrategy.webhook),
-            joinedload(ActivatedStrategy.strategy_code)
-        ).filter(
-            ActivatedStrategy.user_id == current_user.id
-        )
-
-        # Apply filters if provided
-        if execution_type:
-            try:
-                exec_type_enum = ExecutionType(execution_type)
-                query = query.filter(ActivatedStrategy.execution_type == exec_type_enum)
-            except ValueError:
-                logger.warning(f"Invalid execution_type: {execution_type}")
-
-        if strategy_type:
-            try:
-                strat_type_enum = StrategyType(strategy_type)
-                query = query.filter(ActivatedStrategy.strategy_type == strat_type_enum)
-            except ValueError:
-                logger.warning(f"Invalid strategy_type: {strategy_type}")
-
-        if is_active is not None:
-            query = query.filter(ActivatedStrategy.is_active == is_active)
-
-        if ticker:
-            query = query.filter(ActivatedStrategy.ticker == ticker)
-
-        if account_id:
-            query = query.filter(
-                (ActivatedStrategy.account_id == account_id) |
-                (ActivatedStrategy.leader_account_id == account_id)
-            )
-
-        strategies = query.all()
-
-        # Enrich all strategies with webhook/strategy_code data
-        enriched_strategies = []
-        for strategy in strategies:
-            enriched = enrich_strategy_data(strategy, db)
-            enriched_strategies.append(enriched)
-
-        # Sort by most recently triggered/created (same as legacy)
-        enriched_strategies.sort(
-            key=lambda x: x.get("last_triggered") or x.get("created_at") or "",
-            reverse=True
-        )
-
-        logger.info(f"Returning {len(enriched_strategies)} activated strategies for user {current_user.id}")
-
-        return enriched_strategies
-
-    except Exception as e:
-        logger.error(f"Error getting user activated strategies: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch user activated strategies: {str(e)}"
-        )
 
 
 @router.post("/batch", response_model=Dict[str, Any])
