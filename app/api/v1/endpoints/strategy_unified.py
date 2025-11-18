@@ -340,8 +340,9 @@ def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
     # Enrich engine strategies
     elif strategy.execution_type == ExecutionType.ENGINE and strategy.strategy_code_id:
         try:
-            # Use the preloaded relationship instead of making another query
-            strategy_code = strategy.strategy_code
+            # Fetch strategy code since we removed joinedload
+            from app.models import StrategyCode
+            strategy_code = db.query(StrategyCode).filter(StrategyCode.id == strategy.strategy_code_id).first()
 
             if strategy_code:
                 enriched.update({
@@ -362,12 +363,21 @@ def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
             enriched["name"] = "Unknown Engine Strategy"
 
     # Add broker account info
-    if strategy.broker_account:
-        enriched["broker_account"] = {
-            "account_id": strategy.broker_account.account_id,
-            "name": strategy.broker_account.name,
-            "broker_id": strategy.broker_account.broker_id
-        }
+    if strategy.account_id:
+        from app.models import BrokerAccount
+        broker_account = db.query(BrokerAccount).filter(
+            BrokerAccount.account_id == strategy.account_id,
+            BrokerAccount.user_id == strategy.user_id
+        ).first()
+
+        if broker_account:
+            enriched["broker_account"] = {
+                "account_id": broker_account.account_id,
+                "name": broker_account.name,
+                "broker_id": broker_account.broker_id
+            }
+        else:
+            enriched["broker_account"] = None
     else:
         enriched["broker_account"] = None
 
@@ -377,12 +387,21 @@ def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
             follower_accounts = strategy.get_follower_accounts() if hasattr(strategy, 'get_follower_accounts') else []
             enriched["follower_accounts"] = follower_accounts
 
-            if strategy.leader_broker_account:
-                enriched["leader_broker_account"] = {
-                    "account_id": strategy.leader_broker_account.account_id,
-                    "name": strategy.leader_broker_account.name,
-                    "broker_id": strategy.leader_broker_account.broker_id
-                }
+            if strategy.leader_account_id:
+                from app.models import BrokerAccount
+                leader_broker_account = db.query(BrokerAccount).filter(
+                    BrokerAccount.account_id == strategy.leader_account_id,
+                    BrokerAccount.user_id == strategy.user_id
+                ).first()
+
+                if leader_broker_account:
+                    enriched["leader_broker_account"] = {
+                        "account_id": leader_broker_account.account_id,
+                        "name": leader_broker_account.name,
+                        "broker_id": leader_broker_account.broker_id
+                    }
+                else:
+                    enriched["leader_broker_account"] = None
             else:
                 enriched["leader_broker_account"] = None
         except Exception as e:
@@ -606,14 +625,13 @@ async def get_user_activated_strategies(
 
     This provides 100% feature parity with legacy endpoint.
     """
+    logger.info(f"[/user-activated] Called by user {current_user.id} with filters: execution_type={execution_type}, strategy_type={strategy_type}, is_active={is_active}, ticker={ticker}, account_id={account_id}")
+
     try:
         # Get strategies for the user with optional filters
-        query = db.query(ActivatedStrategy).options(
-            joinedload(ActivatedStrategy.broker_account),
-            joinedload(ActivatedStrategy.leader_broker_account),
-            joinedload(ActivatedStrategy.webhook),
-            joinedload(ActivatedStrategy.strategy_code)
-        ).filter(
+        # IMPORTANT: Removed joinedload to prevent hanging issue
+        # We'll fetch related data separately in enrich_strategy_data
+        query = db.query(ActivatedStrategy).filter(
             ActivatedStrategy.user_id == current_user.id
         )
 
@@ -645,6 +663,10 @@ async def get_user_activated_strategies(
             )
 
         strategies = query.all()
+
+        logger.info(f"[/user-activated] Found {len(strategies)} raw strategies for user {current_user.id}")
+        for strategy in strategies:
+            logger.debug(f"[/user-activated] Strategy {strategy.id}: type={strategy.strategy_type}, execution={strategy.execution_type}, ticker={strategy.ticker}, active={strategy.is_active}")
 
         # Enrich all strategies with webhook/strategy_code data
         enriched_strategies = []
