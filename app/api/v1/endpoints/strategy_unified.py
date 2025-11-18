@@ -625,7 +625,7 @@ async def get_user_activated_strategies(
 
     This provides 100% feature parity with legacy endpoint.
     """
-    logger.info(f"[/user-activated] Called by user {current_user.id} with filters: execution_type={execution_type}, strategy_type={strategy_type}, is_active={is_active}, ticker={ticker}, account_id={account_id}")
+    # Log request for monitoring
 
     try:
         # Get strategies for the user with optional filters
@@ -664,9 +664,7 @@ async def get_user_activated_strategies(
 
         strategies = query.all()
 
-        logger.info(f"[/user-activated] Found {len(strategies)} raw strategies for user {current_user.id}")
-        for strategy in strategies:
-            logger.debug(f"[/user-activated] Strategy {strategy.id}: type={strategy.strategy_type}, execution={strategy.execution_type}, ticker={strategy.ticker}, active={strategy.is_active}")
+        # Process found strategies
 
         # Enrich all strategies with webhook/strategy_code data
         enriched_strategies = []
