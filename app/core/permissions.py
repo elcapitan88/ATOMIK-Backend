@@ -200,10 +200,14 @@ def check_resource_limit(resource_type: str):
             except HTTPException:
                 raise
             except Exception as e:
-                logger.error(f"Resource limit check error: {str(e)}")
+                import traceback
+                logger.error(f"Resource limit check error for {resource_type}: {str(e)}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                logger.error(f"Current user: {current_user.id if current_user else 'None'}")
+                logger.error(f"DB session: {db if db else 'None'}")
                 raise HTTPException(
                     status_code=500,
-                    detail="Error checking resource limits"
+                    detail=f"Error checking resource limits: {str(e)}"
                 )
                 
         return wrapper
