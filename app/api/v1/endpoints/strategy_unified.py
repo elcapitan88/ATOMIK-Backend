@@ -404,7 +404,8 @@ def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
 async def create_strategy(
     strategy_data: UnifiedStrategyCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_user),
+    response: Response = None  # Added for decorator compatibility
 ):
     """
     Create a new trading strategy (webhook or engine).
