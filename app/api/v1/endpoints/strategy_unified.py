@@ -18,6 +18,7 @@ from app.models.strategy_code import StrategyCode
 from app.models.strategy_purchase import StrategyPurchase
 from app.models.broker import BrokerAccount
 from app.models.subscription import Subscription
+from app.models.user import User
 from app.schemas.strategy_unified import (
     UnifiedStrategyCreate,
     UnifiedStrategyUpdate,
@@ -28,6 +29,8 @@ from app.schemas.strategy_unified import (
     StrategyListFilters,
     StrategyBatchOperation,
     StrategyScheduleInfo,
+    AccessibleStrategyResponse,
+    AccessType,
     StrategyScheduleUpdate,
     StrategyType,
     ExecutionType,
@@ -967,6 +970,188 @@ async def validate_strategy(
         errors=errors,
         warnings=warnings
     )
+
+
+@router.get("/accessible", response_model=List[AccessibleStrategyResponse])
+async def get_accessible_strategies(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all strategies the user can activate:
+    - Webhook strategies (owned, subscribed, purchased)
+    - Engine strategies (owned, subscribed)
+
+    Returns a unified list suitable for strategy activation modal.
+    """
+    try:
+        accessible_strategies = []
+
+        # 1. Get owned webhooks
+        owned_webhooks = db.query(Webhook).filter(
+            Webhook.user_id == current_user.id
+        ).all()
+
+        for webhook in owned_webhooks:
+            accessible_strategies.append({
+                "id": f"webhook_{webhook.id}",
+                "type": "webhook",
+                "source_id": webhook.token,
+                "name": webhook.name,
+                "description": webhook.details,
+                "access_type": AccessType.OWNED,
+                "category": webhook.strategy_type.lower() if webhook.strategy_type else "uncategorized",
+                "is_premium": False,
+                "creator": current_user.username,
+                "supports_single": True,
+                "supports_multiple": True,
+                "requires_configuration": False,
+                "subscriber_count": webhook.subscriber_count,
+                "rating": webhook.rating,
+                "is_active": webhook.is_active,
+                "created_at": webhook.created_at
+            })
+
+        # 2. Get subscribed webhooks
+        subscribed_webhooks = db.query(Webhook).join(WebhookSubscription).filter(
+            WebhookSubscription.user_id == current_user.id,
+            WebhookSubscription.strategy_type != 'engine'  # Only webhook subscriptions
+        ).all()
+
+        for webhook in subscribed_webhooks:
+            if webhook.user_id != current_user.id:  # Skip if already owned
+                creator = db.query(User).filter(User.id == webhook.user_id).first()
+                accessible_strategies.append({
+                    "id": f"webhook_{webhook.id}",
+                    "type": "webhook",
+                    "source_id": webhook.token,
+                    "name": webhook.name,
+                    "description": webhook.details,
+                    "access_type": AccessType.SUBSCRIBED,
+                    "category": webhook.strategy_type.lower() if webhook.strategy_type else "uncategorized",
+                    "is_premium": webhook.usage_intent == "monetize",
+                    "creator": creator.username if creator else "Unknown",
+                    "supports_single": True,
+                    "supports_multiple": True,
+                    "requires_configuration": False,
+                    "subscriber_count": webhook.subscriber_count,
+                    "rating": webhook.rating,
+                    "is_active": webhook.is_active,
+                    "created_at": webhook.created_at
+                })
+
+        # 3. Get purchased webhooks
+        purchased_webhooks = db.query(Webhook).join(StrategyPurchase).filter(
+            StrategyPurchase.user_id == current_user.id,
+            StrategyPurchase.status == "COMPLETED"
+        ).all()
+
+        for webhook in purchased_webhooks:
+            if webhook.user_id != current_user.id:  # Skip if already owned
+                creator = db.query(User).filter(User.id == webhook.user_id).first()
+                # Check if not already added as subscribed
+                if not any(s["source_id"] == webhook.token for s in accessible_strategies):
+                    accessible_strategies.append({
+                        "id": f"webhook_{webhook.id}",
+                        "type": "webhook",
+                        "source_id": webhook.token,
+                        "name": webhook.name,
+                        "description": webhook.details,
+                        "access_type": AccessType.PURCHASED,
+                        "category": webhook.strategy_type.lower() if webhook.strategy_type else "uncategorized",
+                        "is_premium": True,
+                        "creator": creator.username if creator else "Unknown",
+                        "supports_single": True,
+                        "supports_multiple": True,
+                        "requires_configuration": False,
+                        "subscriber_count": webhook.subscriber_count,
+                        "rating": webhook.rating,
+                        "is_active": webhook.is_active,
+                        "created_at": webhook.created_at
+                    })
+
+        # 4. Get owned engine strategies
+        owned_engines = db.query(StrategyCode).filter(
+            StrategyCode.user_id == current_user.id,
+            StrategyCode.is_active == True,
+            StrategyCode.is_validated == True
+        ).all()
+
+        for strategy_code in owned_engines:
+            accessible_strategies.append({
+                "id": f"engine_{strategy_code.id}",
+                "type": "engine",
+                "source_id": strategy_code.id,
+                "name": strategy_code.name,
+                "description": strategy_code.description,
+                "access_type": AccessType.OWNED,
+                "category": _categorize_engine_strategy(strategy_code.name, strategy_code.description),
+                "is_premium": strategy_code.is_premium if hasattr(strategy_code, 'is_premium') else False,
+                "creator": current_user.username,
+                "supports_single": True,
+                "supports_multiple": True,
+                "requires_configuration": True,
+                "subscriber_count": 0,  # Engine strategies don't track subscribers the same way
+                "rating": None,
+                "is_active": strategy_code.is_active,
+                "created_at": strategy_code.created_at
+            })
+
+        # 5. Get subscribed engine strategies
+        subscribed_engines = db.query(StrategyCode).join(WebhookSubscription).filter(
+            WebhookSubscription.user_id == current_user.id,
+            WebhookSubscription.strategy_type == 'engine',
+            StrategyCode.is_active == True,
+            StrategyCode.is_validated == True
+        ).all()
+
+        for strategy_code in subscribed_engines:
+            if strategy_code.user_id != current_user.id:  # Skip if already owned
+                creator = db.query(User).filter(User.id == strategy_code.user_id).first()
+                accessible_strategies.append({
+                    "id": f"engine_{strategy_code.id}",
+                    "type": "engine",
+                    "source_id": strategy_code.id,
+                    "name": strategy_code.name,
+                    "description": strategy_code.description,
+                    "access_type": AccessType.SUBSCRIBED,
+                    "category": _categorize_engine_strategy(strategy_code.name, strategy_code.description),
+                    "is_premium": strategy_code.is_premium if hasattr(strategy_code, 'is_premium') else False,
+                    "creator": creator.username if creator else "Unknown",
+                    "supports_single": True,
+                    "supports_multiple": True,
+                    "requires_configuration": True,
+                    "subscriber_count": 0,
+                    "rating": None,
+                    "is_active": strategy_code.is_active,
+                    "created_at": strategy_code.created_at
+                })
+
+        logger.info(f"Returning {len(accessible_strategies)} accessible strategies for user {current_user.id}")
+        return accessible_strategies
+
+    except Exception as e:
+        logger.error(f"Error in get_accessible_strategies: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve accessible strategies: {str(e)}")
+
+
+def _categorize_engine_strategy(name: str, description: str = None) -> str:
+    """Helper to categorize engine strategies based on name and description"""
+    name_lower = name.lower()
+    desc_lower = (description or '').lower()
+
+    if 'breakout' in name_lower or 'breakout' in desc_lower:
+        return 'breakout'
+    elif 'momentum' in name_lower or 'momentum' in desc_lower:
+        return 'momentum'
+    elif 'mean' in name_lower or 'reversion' in name_lower or 'reversion' in desc_lower:
+        return 'mean_reversion'
+    elif 'scalp' in name_lower or 'scalp' in desc_lower:
+        return 'scalping'
+    elif 'arbitrage' in name_lower or 'arbitrage' in desc_lower:
+        return 'arbitrage'
+    else:
+        return 'uncategorized'
 
 
 @router.get("/my-strategies", response_model=List[Dict[str, Any]])

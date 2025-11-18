@@ -4,10 +4,17 @@ This replaces the separate webhook/engine strategy schemas with a single unified
 """
 
 from enum import Enum
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from datetime import datetime
 from decimal import Decimal
+
+
+class AccessType(str, Enum):
+    """How the user has access to the strategy"""
+    OWNED = "owned"
+    SUBSCRIBED = "subscribed"
+    PURCHASED = "purchased"
 
 
 class StrategyType(str, Enum):
@@ -328,3 +335,34 @@ class StrategyScheduleUpdate(BaseModel):
                 "market_schedule": ["NYSE", "LONDON"]
             }
         }
+
+
+class AccessibleStrategyResponse(BaseModel):
+    """Schema for strategies accessible to the user for activation"""
+    id: str = Field(..., description="Unique identifier: webhook_{id} or engine_{id}")
+    type: Literal["webhook", "engine"] = Field(..., description="Strategy type")
+    source_id: Union[str, int] = Field(..., description="Webhook token or engine strategy ID")
+    name: str = Field(..., description="Strategy name")
+    description: Optional[str] = Field(None, description="Strategy description")
+    access_type: AccessType = Field(..., description="How user has access: owned, subscribed, or purchased")
+    category: str = Field(..., description="Strategy category")
+    is_premium: bool = Field(default=False, description="Whether this is a premium strategy")
+    creator: Optional[str] = Field(None, description="Strategy creator username")
+
+    # Activation capabilities
+    supports_single: bool = Field(default=True, description="Supports single account activation")
+    supports_multiple: bool = Field(default=True, description="Supports multiple account activation")
+    requires_configuration: bool = Field(default=False, description="Requires additional configuration")
+
+    # Additional metadata
+    subscriber_count: Optional[int] = Field(None, description="Number of subscribers")
+    rating: Optional[float] = Field(None, description="Average rating")
+    is_active: bool = Field(default=True, description="Whether strategy is currently active")
+    created_at: Optional[datetime] = Field(None, description="When strategy was created")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={
+            datetime: lambda v: v.isoformat() if v else None
+        }
+    )
