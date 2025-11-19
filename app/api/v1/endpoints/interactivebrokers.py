@@ -318,18 +318,22 @@ async def get_server_status(
             account.credentials.updated_at = datetime.utcnow()
             db.commit()
         
+        # TEMPORARY: Disabled aggressive /tickle polling to test if it interferes with IBeam auth
         # Add IBeam authentication status if server is running
-        if status and status.get("status") == "running" and status.get("ip_address"):
-            try:
-                # Get broker implementation to check IBeam auth
-                broker = BaseBroker.get_broker_instance("interactivebrokers", db)
-                ibeam_auth = await broker._check_ibeam_auth(status.get("ip_address"))
-                status["ibeam_authenticated"] = ibeam_auth
-            except Exception as e:
-                logger.warning(f"Could not check IBeam auth: {str(e)}")
-                status["ibeam_authenticated"] = None
-        else:
-            status["ibeam_authenticated"] = False
+        # if status and status.get("status") == "running" and status.get("ip_address"):
+        #     try:
+        #         # Get broker implementation to check IBeam auth
+        #         broker = BaseBroker.get_broker_instance("interactivebrokers", db)
+        #         ibeam_auth = await broker._check_ibeam_auth(status.get("ip_address"))
+        #         status["ibeam_authenticated"] = ibeam_auth
+        #     except Exception as e:
+        #         logger.warning(f"Could not check IBeam auth: {str(e)}")
+        #         status["ibeam_authenticated"] = None
+        # else:
+        #     status["ibeam_authenticated"] = False
+        
+        # Return None for now - let background monitoring handle auth checks
+        status["ibeam_authenticated"] = None
             
         return status
         
