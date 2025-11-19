@@ -566,6 +566,28 @@ class DigitalOceanServerManager:
                 logger.error(f"Error updating account status: {str(db_error)}")
                 db_session.rollback()
     
+    async def _initialize_gateway_session(self, ip_address: str) -> bool:
+        """
+        Force Gateway to initialize API session after successful login.
+        This addresses the 'NO SESSION' bug where Gateway is logged in but API session is missing.
+        """
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                # Call the initialization endpoint
+                init_url = f"https://{ip_address}:5000/v1/api/iserver/auth/ssodh/init"
+                # This endpoint expects a POST request
+                response = await client.post(init_url)
+                
+                if response.status_code == 200:
+                    logger.info(f"Successfully initialized Gateway session for {ip_address}")
+                    return True
+                else:
+                    logger.warning(f"Gateway init returned {response.status_code}: {response.text}")
+                    return False
+        except Exception as e:
+            logger.error(f"Failed to initialize Gateway session: {str(e)}")
+            return False
+
     async def _check_ibearmy_running(self, ip_address: str, broker_account=None, db_session=None) -> bool:
         """Check if the IBEam service is running on the droplet and fetch account info if authenticated."""
         try:
@@ -575,20 +597,45 @@ class DigitalOceanServerManager:
                 url = f"https://{ip_address}:5000/v1/api/tickle"
                 response = await client.get(url)
                 
+                # Check if authenticated
+                is_authenticated = False
                 if response.status_code == 200:
                     response_data = response.json()
-                    # Look for authentication status in the response
                     if response_data.get("iserver", {}).get("authStatus", {}).get("authenticated") is True:
-                        logger.info(f"IBEam service running at {ip_address}: authenticated=true")
-                        
-                        # Fetch and store real IB account information
-                        if broker_account and db_session:
-                            await self._fetch_and_store_ib_account_info(ip_address, broker_account, db_session, client)
-                        
-                        return True
+                        is_authenticated = True
+                
+                if is_authenticated:
+                    logger.info(f"IBEam service running at {ip_address}: authenticated=true")
                     
-                logger.warning(f"IBEam service at {ip_address} responded but not authenticated")
-                return False
+                    # Fetch and store real IB account information
+                    if broker_account and db_session:
+                        await self._fetch_and_store_ib_account_info(ip_address, broker_account, db_session, client)
+                    
+                    return True
+                else:
+                    # If not authenticated (401 or authenticated=False), try to initialize session
+                    logger.warning(f"IBEam service at {ip_address} responded but not authenticated. Attempting to force session initialization...")
+                    
+                    # Try to initialize the session
+                    if await self._initialize_gateway_session(ip_address):
+                        # Wait a moment for initialization to take effect
+                        await asyncio.sleep(2)
+                        
+                        # Check again
+                        try:
+                            response = await client.get(url)
+                            if response.status_code == 200:
+                                response_data = response.json()
+                                if response_data.get("iserver", {}).get("authStatus", {}).get("authenticated") is True:
+                                    logger.info(f"IBEam service running at {ip_address}: authenticated=true (after init)")
+                                    if broker_account and db_session:
+                                        await self._fetch_and_store_ib_account_info(ip_address, broker_account, db_session, client)
+                                    return True
+                        except Exception as retry_e:
+                            logger.warning(f"Retry check failed: {str(retry_e)}")
+                    
+                    return False
+                    
         except Exception as e:
             logger.debug(f"IBEam service check failed at {ip_address}: {str(e)}")
             return False
