@@ -675,6 +675,14 @@ sed -i "s/IBEAM_PASSWORD=.*/IBEAM_PASSWORD={ib_password}/" /root/ibeam_files/env
 # Set paper trading mode
 echo "IBEAM_USE_PAPER_ACCOUNT={use_paper}" >> /root/ibeam_files/env.list
 
+# Add timeout and retry configurations to fix login and session validation loops
+echo "IBEAM_PAGE_LOAD_TIMEOUT=60" >> /root/ibeam_files/env.list
+echo "IBEAM_REQUEST_RETRIES=10" >> /root/ibeam_files/env.list
+echo "IBEAM_REQUEST_TIMEOUT=30" >> /root/ibeam_files/env.list
+echo "IBEAM_LOGIN_WAIT_INTERVAL=5" >> /root/ibeam_files/env.list
+echo "IBEAM_MAX_FAILED_AUTH=10" >> /root/ibeam_files/env.list
+echo "IBEAM_MAX_REAUTHENTICATE_RETRIES=10" >> /root/ibeam_files/env.list
+
 # Start IBeam
 . /root/starter.sh
 """
