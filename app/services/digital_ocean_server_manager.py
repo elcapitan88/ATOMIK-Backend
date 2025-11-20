@@ -798,6 +798,7 @@ export IBEAM_REQUEST_TIMEOUT=30
 export IBEAM_LOGIN_WAIT_INTERVAL=5
 export IBEAM_MAX_FAILED_AUTH=50
 export IBEAM_MAX_REAUTHENTICATE_RETRIES=50
+export IBEAM_OAUTH_TIMEOUT=120
 
 echo "Current Environment:"
 env | grep IBEAM
@@ -840,6 +841,7 @@ echo "IBEAM_REQUEST_TIMEOUT=30" >> /root/ibeam_files/env.list
 echo "IBEAM_LOGIN_WAIT_INTERVAL=5" >> /root/ibeam_files/env.list
 echo "IBEAM_MAX_FAILED_AUTH=50" >> /root/ibeam_files/env.list
 echo "IBEAM_MAX_REAUTHENTICATE_RETRIES=50" >> /root/ibeam_files/env.list
+echo "IBEAM_OAUTH_TIMEOUT=120" >> /root/ibeam_files/env.list
 
 # 7. Run the Custom Image
 echo "Starting Atomik IBeam..."
