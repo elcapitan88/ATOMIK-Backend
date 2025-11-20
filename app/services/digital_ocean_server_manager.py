@@ -717,6 +717,10 @@ class DigitalOceanServerManager:
         """
         use_paper = "true" if environment == "paper" else "false"
         
+        # Only include IBEAM_USE_PAPER_ACCOUNT if it is true (Paper)
+        # The working snapshot DOES NOT have this variable set for Live accounts.
+        paper_account_line = f"IBEAM_USE_PAPER_ACCOUNT={use_paper}" if use_paper == "true" else ""
+        
         user_data = f"""#!/bin/bash
 # Vanilla IBeam setup following official guide
 # https://github.com/Voyz/ibeam/wiki/Cloud-Deployment
@@ -736,7 +740,7 @@ echo "Creating env.list..."
 cat <<'EOF' > /root/ibeam_files/env.list
 IBEAM_ACCOUNT={ib_username}
 IBEAM_PASSWORD={ib_password}
-IBEAM_USE_PAPER_ACCOUNT={use_paper}
+{paper_account_line}
 IBEAM_OUTPUTS_DIR=/srv/outputs
 EOF
 
@@ -770,11 +774,14 @@ ips:
   allow:
     - 10.*
     - 192.*
+    - 131.216.*
     - 127.0.0.1
     - 0.0.0.0
     - 172.17.0.*
+    - 170.*
     - 162.220.234.15
-  deny: []
+  deny:
+    - 212.90.324.10
 EOF
 
 # Run vanilla IBeam container
