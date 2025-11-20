@@ -805,7 +805,7 @@ env | grep IBEAM
 python3 -u /srv/ibeam/watchdog.py &
 
 cd /srv/ibeam
-./bin/run.sh /srv/ibeam/conf.yaml
+sh run.sh
 START_EOF
 
 chmod +x start.sh
