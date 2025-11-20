@@ -702,6 +702,13 @@ class DigitalOceanServerManager:
         """
         Generate user data script for configuring IBeam credentials.
         
+        This version implements the "Build on Droplet" strategy:
+        1. Creates a watchdog.py script to fix the session loop locally
+        2. Creates a start.sh entrypoint
+        3. Creates a Dockerfile to bundle it all
+        4. Builds the custom image on the droplet
+        5. Runs the custom image
+        
         Args:
             ib_username: Interactive Brokers username
             ib_password: Interactive Brokers password
@@ -713,25 +720,153 @@ class DigitalOceanServerManager:
         # Determine if paper trading should be enabled
         use_paper = "true" if environment == "paper" else "false"
         
-        # Create a bash script to update credentials and start IBeam
+        # Create a bash script that does the heavy lifting
         user_data = f"""#!/bin/bash
-# Update IBeam credentials
-sed -i "s/IBEAM_ACCOUNT=.*/IBEAM_ACCOUNT={ib_username}/" /root/ibeam_files/env.list
-sed -i "s/IBEAM_PASSWORD=.*/IBEAM_PASSWORD={ib_password}/" /root/ibeam_files/env.list
 
-# Set paper trading mode
+# 1. Setup Build Directory
+mkdir -p /root/ibeam_build
+cd /root/ibeam_build
+
+# 2. Create the Watchdog Script (Python)
+# This runs INSIDE the container and fixes the session loop immediately
+cat << 'EOF' > watchdog.py
+import time
+import requests
+import logging
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s|WATCHDOG|%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+def check_and_fix_session():
+    base_url = "https://localhost:5000/v1/api"
+    tickle_url = f"{{base_url}}/tickle"
+    init_url = f"{{base_url}}/iserver/auth/ssodh/init"
+    
+    logging.info("Starting Session Watchdog...")
+    
+    # Wait for Gateway to start listening
+    while True:
+        try:
+            requests.get(tickle_url, verify=False, timeout=2)
+            logging.info("Gateway is up! Starting monitoring loop.")
+            break
+        except:
+            time.sleep(1)
+            
+    # Monitor Loop
+    while True:
+        try:
+            # Check status
+            response = requests.get(tickle_url, verify=False, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                auth_status = data.get("iserver", {{}}).get("authStatus", {{}})
+                authenticated = auth_status.get("authenticated", False)
+                competing = auth_status.get("competing", False)
+                
+                if authenticated:
+                    # All good, sleep a bit
+                    time.sleep(5)
+                else:
+                    # Not authenticated - Check if we should intervene
+                    logging.warning(f"Not authenticated. Status: {{auth_status}}")
+                    
+                    # If we are connected but not authenticated, FORCE INIT
+                    # This is the fix for the "NO SESSION" bug
+                    logging.info("Attempting to FORCE INITIALIZE session...")
+                    try:
+                        init_resp = requests.post(init_url, verify=False, timeout=5)
+                        logging.info(f"Init response: {{init_resp.status_code}} - {{init_resp.text}}")
+                        # Sleep briefly to let it take effect
+                        time.sleep(2)
+                    except Exception as e:
+                        logging.error(f"Failed to call init: {{e}}")
+                        
+            else:
+                logging.warning(f"Tickle returned {{response.status_code}}")
+                
+        except Exception as e:
+            logging.error(f"Watchdog error: {{e}}")
+            
+        # Poll frequently to catch the race condition
+        time.sleep(2)
+
+if __name__ == "__main__":
+    # Give the main process a moment to start
+    time.sleep(5)
+    check_and_fix_session()
+EOF
+
+# 3. Create the Entrypoint Script
+# Starts both IBeam and the Watchdog
+cat << 'EOF' > start.sh
+#!/bin/bash
+
+# Start the Watchdog in the background
+python3 /srv/ibeam/watchdog.py &
+
+# Start the main IBeam process (this is what the original image does)
+/srv/ibeam/bin/run.sh /srv/ibeam/conf.yaml
+EOF
+
+# Make it executable
+chmod +x start.sh
+
+# 4. Create the Dockerfile
+cat << 'EOF' > Dockerfile
+FROM voyz/ibeam:latest
+
+# Install python requests for the watchdog
+RUN pip install requests
+
+# Copy our scripts
+COPY watchdog.py /srv/ibeam/watchdog.py
+COPY start.sh /srv/ibeam/start.sh
+
+# Set the new entrypoint
+ENTRYPOINT ["/srv/ibeam/start.sh"]
+EOF
+
+# 5. Build the Custom Image
+echo "Building custom Atomik IBeam image..."
+docker build -t atomik-ibeam .
+
+# 6. Configure Environment
+mkdir -p /root/ibeam_files
+touch /root/ibeam_files/env.list
+
+# Write env vars
+echo "IBEAM_ACCOUNT={ib_username}" > /root/ibeam_files/env.list
+echo "IBEAM_PASSWORD={ib_password}" >> /root/ibeam_files/env.list
 echo "IBEAM_USE_PAPER_ACCOUNT={use_paper}" >> /root/ibeam_files/env.list
+echo "IBEAM_OUTPUTS_DIR=/srv/outputs" >> /root/ibeam_files/env.list
 
-# Add timeout and retry configurations to fix login and session validation loops
+# Timeout settings (still good to have)
 echo "IBEAM_PAGE_LOAD_TIMEOUT=60" >> /root/ibeam_files/env.list
 echo "IBEAM_REQUEST_RETRIES=10" >> /root/ibeam_files/env.list
 echo "IBEAM_REQUEST_TIMEOUT=30" >> /root/ibeam_files/env.list
 echo "IBEAM_LOGIN_WAIT_INTERVAL=5" >> /root/ibeam_files/env.list
-echo "IBEAM_MAX_FAILED_AUTH=10" >> /root/ibeam_files/env.list
-echo "IBEAM_MAX_REAUTHENTICATE_RETRIES=10" >> /root/ibeam_files/env.list
+# Increase these to prevent premature killing while watchdog works
+echo "IBEAM_MAX_FAILED_AUTH=50" >> /root/ibeam_files/env.list
+echo "IBEAM_MAX_REAUTHENTICATE_RETRIES=50" >> /root/ibeam_files/env.list
 
-# Start IBeam
-. /root/starter.sh
+# 7. Run the Custom Image
+echo "Starting Atomik IBeam..."
+docker rm -f ibeam || true
+docker run -d \\
+  --env-file /root/ibeam_files/env.list \\
+  --name ibeam \\
+  -p 5000:5000 \\
+  -v /root/ibeam_files/inputs_directory/:/srv/inputs \\
+  -v /root/ibeam_files/outputs:/srv/outputs:rw \\
+  atomik-ibeam
+
 """
         return user_data
     
