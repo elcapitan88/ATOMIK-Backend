@@ -700,151 +700,85 @@ class DigitalOceanServerManager:
         environment: str = "paper"
     ) -> str:
         """
-        Generate user data script for configuring IBeam credentials.
+        Generate user data script for vanilla IBeam deployment.
         
-        This version implements the "Build on Droplet" strategy:
-        1. Creates a watchdog.py script to fix the session loop locally
-        2. Creates a start.sh entrypoint
-        3. Creates a Dockerfile to bundle it all
-        4. Builds the custom image on the droplet
-        5. Runs the custom image
+        This follows the official IBeam Cloud Deployment guide:
+        - Creates env.list with credentials
+        - Creates conf.yaml with Railway IP whitelist
+        - Runs vanilla voyz/ibeam:latest (no custom images)
         
         Args:
             ib_username: Interactive Brokers username
             ib_password: Interactive Brokers password
-            environment: Trading environment (demo/paper/live)
-            
+            environment: "demo", "live", or "paper"
+        
         Returns:
-            str: User data script
+            A bash script to be executed via cloud-init
         """
-        # Determine if paper trading should be enabled
         use_paper = "true" if environment == "paper" else "false"
         
-        # Create a bash script that does the heavy lifting
         user_data = f"""#!/bin/bash
+# Vanilla IBeam setup following official guide
+# https://github.com/Voyz/ibeam/wiki/Cloud-Deployment
 
-# 1. Setup Build Directory
-mkdir -p /root/ibeam_build
-cd /root/ibeam_build
+# Update packages and install Docker if not already installed
+apt-get update
+apt-get install -y docker.io
 
-# 2. Create the Watchdog Script (Python)
-cat << 'WATCHDOG_EOF' > watchdog.py
-import time
-import requests
-import logging
-import sys
+# Create IBeam directory structure
+echo "Creating IBeam directories..."
+mkdir -p /root/ibeam_files/outputs
+chmod 777 /root/ibeam_files/outputs
+mkdir -p /root/ibeam_files/inputs_directory
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s|WATCHDOG|%(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
+# Create environment variable file
+echo "Creating env.list..."
+cat <<'EOF' > /root/ibeam_files/env.list
+IBEAM_ACCOUNT={ib_username}
+IBEAM_PASSWORD={ib_password}
+IBEAM_USE_PAPER_ACCOUNT={use_paper}
+IBEAM_OUTPUTS_DIR=/srv/outputs
+EOF
 
-def check_and_fix_session():
-    base_url = "https://localhost:5000/v1/api"
-    tickle_url = f"{{base_url}}/tickle"
-    init_url = f"{{base_url}}/iserver/auth/ssodh/init"
-    
-    logging.info("Starting Session Watchdog...")
-    
-    while True:
-        try:
-            requests.get(tickle_url, verify=False, timeout=1)
-            logging.info("Gateway is up! Starting monitoring loop.")
-            break
-        except:
-            time.sleep(0.5)
-            
-    while True:
-        try:
-            response = requests.get(tickle_url, verify=False, timeout=2)
-            
-            if response.status_code == 200:
-                data = response.json()
-                auth_status = data.get("iserver", {{}}).get("authStatus", {{}})
-                authenticated = auth_status.get("authenticated", False)
-                
-                if authenticated:
-                    time.sleep(2)
-                else:
-                    logging.warning(f"Not authenticated. Status: {{auth_status}}")
-                    logging.info("Attempting to FORCE INITIALIZE session...")
-                    try:
-                        init_resp = requests.post(init_url, verify=False, timeout=5)
-                        logging.info(f"Init response: {{init_resp.status_code}} - {{init_resp.text}}")
-                        time.sleep(1)
-                    except Exception as e:
-                        logging.error(f"Failed to call init: {{e}}")
-            else:
-                logging.warning(f"Tickle returned {{response.status_code}}")
-                
-        except Exception as e:
-            logging.error(f"Watchdog error: {{e}}")
-            
-        time.sleep(0.5)
+# Create Gateway configuration with Railway IP whitelist
+echo "Creating conf.yaml..."
+cat <<'EOF' > /root/ibeam_files/inputs_directory/conf.yaml
+ip2loc: "US"
+proxyRemoteSsl: true
+proxyRemoteHost: "https://api.ibkr.com"
+listenPort: 5000
+listenSsl: true
+ccp: false
+svcEnvironment: "v1"
+sslCert: "vertx.jks"
+sslPwd: "mywebapi"
+authDelay: 3000
+portalBaseURL: ""
+serverOptions:
+  blockedThreadCheckInterval: 1000000
+  eventLoopPoolSize: 20
+  workerPoolSize: 20
+  maxWorkerExecuteTime: 100
+  internalBlockingPoolSize: 20
+cors:
+  origin.allowed: "*"
+  allowCredentials: false
+webApps:
+  - name: "demo"
+    index: "index.html"
+ips:
+  allow:
+    - 10.*
+    - 192.*
+    - 127.0.0.1
+    - 0.0.0.0
+    - 172.17.0.*
+    - 162.220.234.15
+  deny: []
+EOF
 
-if __name__ == "__main__":
-    time.sleep(1)
-    check_and_fix_session()
-WATCHDOG_EOF
-
-# 3. Create the Entrypoint Script
-cat << 'START_EOF' > start.sh
-#!/bin/bash
-
-export IBEAM_PAGE_LOAD_TIMEOUT=60
-export IBEAM_REQUEST_RETRIES=10
-export IBEAM_REQUEST_TIMEOUT=30
-export IBEAM_LOGIN_WAIT_INTERVAL=5
-export IBEAM_MAX_FAILED_AUTH=50
-export IBEAM_MAX_REAUTHENTICATE_RETRIES=50
-export IBEAM_OAUTH_TIMEOUT=120
-
-echo "Current Environment:"
-env | grep IBEAM
-
-# python3 -u /srv/ibeam/watchdog.py &
-
-cd /srv/ibeam
-sh run.sh
-START_EOF
-
-chmod +x start.sh
-
-# 4. Create the Dockerfile
-cat << 'DOCKER_EOF' > Dockerfile
-FROM voyz/ibeam:latest
-
-RUN pip install requests
-
-COPY watchdog.py /srv/ibeam/watchdog.py
-COPY start.sh /srv/ibeam/start.sh
-
-ENTRYPOINT ["/srv/ibeam/start.sh"]
-DOCKER_EOF
-
-# 5. Build the Custom Image
-echo "Building custom Atomik IBeam image..."
-docker build -t atomik-ibeam .
-
-# 6. Configure Environment
-mkdir -p /root/ibeam_files
-touch /root/ibeam_files/env.list
-
-echo "IBEAM_ACCOUNT={ib_username}" > /root/ibeam_files/env.list
-echo "IBEAM_PASSWORD={ib_password}" >> /root/ibeam_files/env.list
-echo "IBEAM_USE_PAPER_ACCOUNT={use_paper}" >> /root/ibeam_files/env.list
-echo "IBEAM_OUTPUTS_DIR=/srv/outputs" >> /root/ibeam_files/env.list
-echo "IBEAM_PAGE_LOAD_TIMEOUT=60" >> /root/ibeam_files/env.list
-echo "IBEAM_REQUEST_RETRIES=10" >> /root/ibeam_files/env.list
-echo "IBEAM_REQUEST_TIMEOUT=30" >> /root/ibeam_files/env.list
-echo "IBEAM_LOGIN_WAIT_INTERVAL=5" >> /root/ibeam_files/env.list
-echo "IBEAM_MAX_FAILED_AUTH=50" >> /root/ibeam_files/env.list
-echo "IBEAM_MAX_REAUTHENTICATE_RETRIES=50" >> /root/ibeam_files/env.list
-echo "IBEAM_OAUTH_TIMEOUT=120" >> /root/ibeam_files/env.list
-
-# 7. Run the Custom Image
-echo "Starting Atomik IBeam..."
+# Run vanilla IBeam container
+echo "Starting vanilla IBeam..."
 docker rm -f ibeam || true
 docker run -d \\
   --env-file /root/ibeam_files/env.list \\
@@ -852,14 +786,16 @@ docker run -d \\
   -p 5000:5000 \\
   -v /root/ibeam_files/inputs_directory/:/srv/inputs \\
   -v /root/ibeam_files/outputs:/srv/outputs:rw \\
-  atomik-ibeam
+  voyz/ibeam:latest
 
+echo "IBeam started. Monitor logs with: docker logs -f ibeam"
 """
         return user_data
     
     async def cleanup(self):
         """Close resources when shutting down"""
         await self.client.aclose()
+
 
 
 # Create singleton instance
