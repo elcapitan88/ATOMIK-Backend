@@ -728,35 +728,99 @@ mkdir -p /root/ibeam_build
 cd /root/ibeam_build
 
 # 2. Create the Watchdog Script (Python)
-# This runs INSIDE the container and fixes the session loop immediately
-cat << 'EOF' > watchdog.py
+cat << 'WATCHDOG_EOF' > watchdog.py
 import time
 import requests
 import logging
 import sys
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s|WATCHDOG|%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
-# Make it executable
+def check_and_fix_session():
+    base_url = "https://localhost:5000/v1/api"
+    tickle_url = f"{{base_url}}/tickle"
+    init_url = f"{{base_url}}/iserver/auth/ssodh/init"
+    
+    logging.info("Starting Session Watchdog...")
+    
+    while True:
+        try:
+            requests.get(tickle_url, verify=False, timeout=1)
+            logging.info("Gateway is up! Starting monitoring loop.")
+            break
+        except:
+            time.sleep(0.5)
+            
+    while True:
+        try:
+            response = requests.get(tickle_url, verify=False, timeout=2)
+            
+            if response.status_code == 200:
+                data = response.json()
+                auth_status = data.get("iserver", {{}}).get("authStatus", {{}})
+                authenticated = auth_status.get("authenticated", False)
+                
+                if authenticated:
+                    time.sleep(2)
+                else:
+                    logging.warning(f"Not authenticated. Status: {{auth_status}}")
+                    logging.info("Attempting to FORCE INITIALIZE session...")
+                    try:
+                        init_resp = requests.post(init_url, verify=False, timeout=5)
+                        logging.info(f"Init response: {{init_resp.status_code}} - {{init_resp.text}}")
+                        time.sleep(1)
+                    except Exception as e:
+                        logging.error(f"Failed to call init: {{e}}")
+            else:
+                logging.warning(f"Tickle returned {{response.status_code}}")
+                
+        except Exception as e:
+            logging.error(f"Watchdog error: {{e}}")
+            
+        time.sleep(0.5)
+
+if __name__ == "__main__":
+    time.sleep(1)
+    check_and_fix_session()
+WATCHDOG_EOF
+
+# 3. Create the Entrypoint Script
+cat << 'START_EOF' > start.sh
+#!/bin/bash
+
+export IBEAM_PAGE_LOAD_TIMEOUT=60
+export IBEAM_REQUEST_RETRIES=10
+export IBEAM_REQUEST_TIMEOUT=30
+export IBEAM_LOGIN_WAIT_INTERVAL=5
+export IBEAM_MAX_FAILED_AUTH=50
+export IBEAM_MAX_REAUTHENTICATE_RETRIES=50
+
+echo "Current Environment:"
+env | grep IBEAM
+
+python3 -u /srv/ibeam/watchdog.py &
+
+cd /srv/ibeam
+./bin/run.sh /srv/ibeam/conf.yaml
+START_EOF
+
 chmod +x start.sh
 
 # 4. Create the Dockerfile
-cat << 'EOF' > Dockerfile
+cat << 'DOCKER_EOF' > Dockerfile
 FROM voyz/ibeam:latest
 
-# Install python requests for the watchdog
 RUN pip install requests
 
-# Copy our scripts
 COPY watchdog.py /srv/ibeam/watchdog.py
 COPY start.sh /srv/ibeam/start.sh
 
-# Set the new entrypoint
 ENTRYPOINT ["/srv/ibeam/start.sh"]
-EOF
+DOCKER_EOF
 
 # 5. Build the Custom Image
 echo "Building custom Atomik IBeam image..."
@@ -766,18 +830,14 @@ docker build -t atomik-ibeam .
 mkdir -p /root/ibeam_files
 touch /root/ibeam_files/env.list
 
-# Write env vars
 echo "IBEAM_ACCOUNT={ib_username}" > /root/ibeam_files/env.list
 echo "IBEAM_PASSWORD={ib_password}" >> /root/ibeam_files/env.list
 echo "IBEAM_USE_PAPER_ACCOUNT={use_paper}" >> /root/ibeam_files/env.list
 echo "IBEAM_OUTPUTS_DIR=/srv/outputs" >> /root/ibeam_files/env.list
-
-# Timeout settings (still good to have)
 echo "IBEAM_PAGE_LOAD_TIMEOUT=60" >> /root/ibeam_files/env.list
 echo "IBEAM_REQUEST_RETRIES=10" >> /root/ibeam_files/env.list
 echo "IBEAM_REQUEST_TIMEOUT=30" >> /root/ibeam_files/env.list
 echo "IBEAM_LOGIN_WAIT_INTERVAL=5" >> /root/ibeam_files/env.list
-# Increase these to prevent premature killing while watchdog works
 echo "IBEAM_MAX_FAILED_AUTH=50" >> /root/ibeam_files/env.list
 echo "IBEAM_MAX_REAUTHENTICATE_RETRIES=50" >> /root/ibeam_files/env.list
 
