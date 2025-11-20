@@ -811,8 +811,10 @@ cat << 'EOF' > start.sh
 # Start the Watchdog in the background
 python3 /srv/ibeam/watchdog.py &
 
-# Start the main IBeam process (this is what the original image does)
-/srv/ibeam/bin/run.sh /srv/ibeam/conf.yaml
+# Start the main IBeam process
+# The original image uses WORKDIR /srv/ibeam and runs bin/run.sh
+cd /srv/ibeam
+./bin/run.sh /srv/ibeam/conf.yaml
 EOF
 
 # Make it executable
