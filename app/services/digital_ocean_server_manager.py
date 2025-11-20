@@ -803,7 +803,7 @@ export IBEAM_OAUTH_TIMEOUT=120
 echo "Current Environment:"
 env | grep IBEAM
 
-python3 -u /srv/ibeam/watchdog.py &
+# python3 -u /srv/ibeam/watchdog.py &
 
 cd /srv/ibeam
 sh run.sh
