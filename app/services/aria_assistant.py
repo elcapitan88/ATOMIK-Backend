@@ -20,6 +20,8 @@ from .intent_service import IntentService, VoiceIntent
 from .aria_context_engine import ARIAContextEngine
 from .aria_action_executor import ARIAActionExecutor
 from .llm_service import LLMService
+# TEMPORARY: Market data service using yfinance - will migrate to atomik-data-hub
+from .market_data_service import MarketDataService
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,8 @@ class ARIAAssistant:
         self.context_engine = ARIAContextEngine(db)
         self.action_executor = ARIAActionExecutor(db)
         self.llm_service = LLMService()
+        # TEMPORARY: Market data service - will migrate to atomik-data-hub
+        self.market_data_service = MarketDataService()
         
     async def process_user_input(
         self, 
@@ -497,6 +501,13 @@ class ARIAAssistant:
         elif intent.type == "help_request" or intent.type == "greeting":
             return await self._generate_conversational_response(user_context, intent, input_type, original_query)
 
+        # TEMPORARY: Market data queries - will migrate to atomik-data-hub
+        elif intent.type == "market_price_query":
+            return await self._generate_market_price_response(intent, original_query)
+
+        elif intent.type == "market_historical_query":
+            return await self._generate_market_historical_response(intent, original_query)
+
         elif intent.type == "unknown":
             # Use LLM to handle unknown intents conversationally
             return await self._generate_conversational_response(user_context, intent, input_type, original_query)
@@ -721,9 +732,197 @@ class ARIAAssistant:
             status = "flat"
         
         text = f"{emoji} Today you're {status} ${abs(daily_pnl):.2f} with {total_trades} trades."
-        
+
         return {
             "text": text,
             "type": ARIAResponseType.TEXT.value,
             "performance_data": performance
         }
+
+    # ================================================================
+    # TEMPORARY: Market Data Methods - will migrate to atomik-data-hub
+    # ================================================================
+
+    async def _generate_market_price_response(
+        self,
+        intent: VoiceIntent,
+        original_query: str
+    ) -> Dict[str, Any]:
+        """
+        TEMPORARY: Generate market price response using yfinance
+
+        This will be migrated to atomik-data-hub once data sources are configured.
+        """
+        symbol = intent.parameters.get("symbol", "").upper()
+
+        if not symbol:
+            return {
+                "text": "I couldn't identify the stock symbol. Please try again with a specific symbol like AAPL or TSLA.",
+                "type": ARIAResponseType.TEXT.value
+            }
+
+        try:
+            # Fetch quote from market data service
+            quote_result = await self.market_data_service.get_quote(symbol)
+
+            if not quote_result.get("success"):
+                return {
+                    "text": f"I couldn't fetch data for {symbol}. Error: {quote_result.get('error', 'Unknown error')}",
+                    "type": ARIAResponseType.ERROR.value
+                }
+
+            data = quote_result["data"]
+            price = data.get("price", 0)
+            change = data.get("change", 0)
+            change_pct = data.get("change_percent", 0)
+            high = data.get("day_high", 0)
+            low = data.get("day_low", 0)
+            volume = data.get("volume", 0)
+
+            # Determine emoji based on change
+            if change > 0:
+                emoji = "📈"
+                direction = "up"
+            elif change < 0:
+                emoji = "📉"
+                direction = "down"
+            else:
+                emoji = "➡️"
+                direction = "flat"
+
+            # Try to enhance with LLM if available
+            if self.llm_service.client:
+                try:
+                    llm_result = await self.llm_service.analyze_market_data(
+                        query=original_query,
+                        market_data=data
+                    )
+                    if llm_result.get("success"):
+                        return {
+                            "text": llm_result["text"],
+                            "type": ARIAResponseType.TEXT.value,
+                            "market_data": data,
+                            "llm_enhanced": True,
+                            "provider": llm_result.get("provider")
+                        }
+                except Exception as e:
+                    logger.warning(f"LLM enhancement failed for market data: {e}")
+
+            # Fallback to template response
+            text = f"{emoji} {symbol} is trading at ${price:.2f}, {direction} ${abs(change):.2f} ({change_pct:+.2f}%) today. "
+            text += f"Day range: ${low:.2f} - ${high:.2f}."
+
+            if volume:
+                text += f" Volume: {volume:,.0f}."
+
+            return {
+                "text": text,
+                "type": ARIAResponseType.TEXT.value,
+                "market_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Market price query error: {e}")
+            return {
+                "text": f"I encountered an error fetching {symbol} data. Please try again.",
+                "type": ARIAResponseType.ERROR.value,
+                "error": str(e)
+            }
+
+    async def _generate_market_historical_response(
+        self,
+        intent: VoiceIntent,
+        original_query: str
+    ) -> Dict[str, Any]:
+        """
+        TEMPORARY: Generate market historical/range response using yfinance
+
+        This will be migrated to atomik-data-hub once data sources are configured.
+        """
+        symbol = intent.parameters.get("symbol", "").upper()
+        period_raw = intent.parameters.get("period", "week").lower()
+
+        # Map period to yfinance format
+        period_map = {
+            "day": "1d",
+            "today": "1d",
+            "week": "1wk",
+            "weekly": "1wk",
+            "month": "1mo",
+            "monthly": "1mo"
+        }
+        period = period_map.get(period_raw, "1wk")
+
+        if not symbol:
+            return {
+                "text": "I couldn't identify the stock symbol. Please try again with a specific symbol.",
+                "type": ARIAResponseType.TEXT.value
+            }
+
+        try:
+            # Fetch historical data from market data service
+            hist_result = await self.market_data_service.get_historical(symbol, period)
+
+            if not hist_result.get("success"):
+                return {
+                    "text": f"I couldn't fetch historical data for {symbol}. Error: {hist_result.get('error', 'Unknown error')}",
+                    "type": ARIAResponseType.ERROR.value
+                }
+
+            data = hist_result["data"]
+            high = data.get("high", 0)
+            low = data.get("low", 0)
+            range_val = data.get("range", 0)
+            period_change = data.get("period_change", 0)
+            period_change_pct = data.get("period_change_percent", 0)
+            start_date = data.get("start_date", "")
+            end_date = data.get("end_date", "")
+
+            # Determine emoji
+            if period_change > 0:
+                emoji = "📈"
+                direction = "up"
+            elif period_change < 0:
+                emoji = "📉"
+                direction = "down"
+            else:
+                emoji = "➡️"
+                direction = "flat"
+
+            # Try to enhance with LLM if available
+            if self.llm_service.client:
+                try:
+                    llm_result = await self.llm_service.analyze_market_data(
+                        query=original_query,
+                        market_data=data
+                    )
+                    if llm_result.get("success"):
+                        return {
+                            "text": llm_result["text"],
+                            "type": ARIAResponseType.TEXT.value,
+                            "market_data": data,
+                            "llm_enhanced": True,
+                            "provider": llm_result.get("provider")
+                        }
+                except Exception as e:
+                    logger.warning(f"LLM enhancement failed for historical data: {e}")
+
+            # Fallback to template response
+            period_text = period_raw.replace("ly", "") if period_raw.endswith("ly") else period_raw
+            text = f"{emoji} {symbol} {period_text} summary: "
+            text += f"Range ${low:.2f} - ${high:.2f} (${range_val:.2f} spread). "
+            text += f"{direction.title()} ${abs(period_change):.2f} ({period_change_pct:+.2f}%) over the period."
+
+            return {
+                "text": text,
+                "type": ARIAResponseType.TEXT.value,
+                "market_data": data
+            }
+
+        except Exception as e:
+            logger.error(f"Market historical query error: {e}")
+            return {
+                "text": f"I encountered an error fetching {symbol} historical data. Please try again.",
+                "type": ARIAResponseType.ERROR.value,
+                "error": str(e)
+            }

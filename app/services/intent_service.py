@@ -26,6 +26,9 @@ class IntentType(Enum):
     ACCOUNT_CONTROL = "account_control"
     HELP_REQUEST = "help_request"
     GREETING = "greeting"
+    # TEMPORARY: Market data intents - will migrate to atomik-data-hub
+    MARKET_PRICE_QUERY = "market_price_query"
+    MARKET_HISTORICAL_QUERY = "market_historical_query"
     UNKNOWN = "unknown"
 
 class IntentService:
@@ -139,6 +142,27 @@ class IntentService:
                 r"(?:how\s+are\s+you|what'?s\s+up)",
                 r"(?:aria|assistant)(?:\s+hello|\s+hi)?",
                 r"(?:thanks?|thank\s+you|thx)(?:\s+aria)?"
+            ],
+
+            # TEMPORARY: Market data patterns - will migrate to atomik-data-hub
+            IntentType.MARKET_PRICE_QUERY.value: [
+                # Price queries
+                r"(?:what'?s|what\s+is)\s+(?:the\s+)?(?:price\s+of\s+)?(?P<symbol>[A-Z]{1,5})(?:\s+(?:trading|price|at))?",
+                r"(?:how'?s|how\s+is)\s+(?P<symbol>[A-Z]{1,5})\s+(?:doing|trading|performing)?",
+                r"(?:price|quote)\s+(?:of\s+|for\s+)?(?P<symbol>[A-Z]{1,5})",
+                r"(?P<symbol>[A-Z]{1,5})\s+(?:stock\s+)?(?:price|quote)",
+                r"(?:what'?s|get)\s+(?P<symbol>[A-Z]{1,5})\s+(?:trading\s+at|price)",
+                r"(?:show\s+me\s+)?(?P<symbol>[A-Z]{1,5})\s+(?:stock|quote|price)",
+                r"(?:how\s+much\s+is)\s+(?P<symbol>[A-Z]{1,5})"
+            ],
+
+            IntentType.MARKET_HISTORICAL_QUERY.value: [
+                # Historical/range queries
+                r"(?:what\s+was|what'?s)\s+(?P<symbol>[A-Z]{1,5})(?:'?s)?\s+(?:range|high|low)\s+(?:last\s+|this\s+)?(?P<period>week|month|day|today)?",
+                r"(?P<symbol>[A-Z]{1,5})\s+(?:range|historical|history)\s+(?:last\s+|this\s+)?(?P<period>week|month|day)?",
+                r"(?:show\s+me\s+)?(?P<symbol>[A-Z]{1,5})\s+(?:last\s+|this\s+)?(?P<period>week|month|day)'?s?\s+(?:data|range|history)?",
+                r"(?:how\s+did)\s+(?P<symbol>[A-Z]{1,5})\s+(?:do|perform)\s+(?:last\s+|this\s+)?(?P<period>week|month)?",
+                r"(?P<symbol>[A-Z]{1,5})\s+(?P<period>weekly|monthly|daily)\s+(?:range|performance|data)"
             ]
         }
     
@@ -365,5 +389,14 @@ class IntentService:
                 "Show active strategies",
                 "List my strategies",
                 "Strategy status"
+            ],
+            # TEMPORARY: Market data examples - will migrate to atomik-data-hub
+            "Market Data": [
+                "What's AAPL trading at?",
+                "Price of TSLA",
+                "How's SPY doing?",
+                "NVDA stock price",
+                "What was AAPL's range last week?",
+                "MSFT weekly performance"
             ]
         }
