@@ -34,6 +34,29 @@ MARKET_KEYWORDS = {
     'performance', 'performing', 'change', 'changed', 'percent'
 }
 
+# General financial/trading question keywords (for LLM-powered responses)
+FINANCIAL_KEYWORDS = {
+    # Market concepts
+    'market', 'stock', 'stocks', 'equity', 'equities', 'bond', 'bonds',
+    'futures', 'options', 'forex', 'crypto', 'cryptocurrency', 'etf',
+    'index', 'indices', 'commodities', 'sector', 'sectors',
+    # Trading concepts
+    'trading', 'trade', 'trades', 'invest', 'investing', 'investment',
+    'portfolio', 'diversification', 'hedge', 'hedging', 'leverage',
+    'margin', 'short', 'long', 'position', 'positions',
+    # Analysis terms
+    'bull', 'bullish', 'bear', 'bearish', 'rally', 'crash', 'correction',
+    'volatility', 'momentum', 'trend', 'support', 'resistance',
+    'breakout', 'breakdown', 'reversal', 'consolidation',
+    # Economic terms
+    'inflation', 'deflation', 'recession', 'gdp', 'interest', 'rates',
+    'fed', 'federal reserve', 'earnings', 'revenue', 'profit', 'loss',
+    'dividend', 'yield', 'pe ratio', 'valuation', 'fundamentals',
+    # Actions/questions
+    'buy', 'sell', 'hold', 'should', 'when', 'why', 'how', 'what',
+    'explain', 'difference', 'better', 'worse', 'risk', 'safe', 'risky'
+}
+
 @dataclass
 class VoiceIntent:
     """Represents a parsed voice/text intent with parameters"""
@@ -56,6 +79,8 @@ class IntentType(Enum):
     # TEMPORARY: Market data intents - will migrate to atomik-data-hub
     MARKET_PRICE_QUERY = "market_price_query"
     MARKET_HISTORICAL_QUERY = "market_historical_query"
+    # General financial/trading questions (answered by LLM)
+    GENERAL_FINANCIAL_QUERY = "general_financial_query"
     UNKNOWN = "unknown"
 
 class IntentService:
@@ -159,6 +184,70 @@ class IntentService:
                 return True
 
         return False
+
+    def is_general_financial_query(self, text: str) -> bool:
+        """
+        Check if the text appears to be a general financial/trading question.
+        These are questions about markets, trading concepts, or financial topics
+        that can be answered by the LLM without needing specific symbol data.
+        """
+        text_lower = text.lower()
+        words = text_lower.split()
+
+        # Count financial keywords
+        keyword_count = sum(1 for word in words if word in FINANCIAL_KEYWORDS)
+
+        # Check for question patterns
+        question_patterns = [
+            r'\b(what|why|how|when|should|can|will|is|are|do|does)\b.*\b(market|stock|trading|invest|bull|bear|crash|rally)\b',
+            r'\b(explain|tell me about|what is|what are)\b',
+            r'\b(difference between|compare|versus|vs)\b',
+            r'\b(going to|gonna|will the)\b.*\b(market|stock|crash|rally|go up|go down)\b',
+        ]
+
+        is_question = any(re.search(pattern, text_lower) for pattern in question_patterns)
+
+        # It's a general financial query if:
+        # 1. Has 2+ financial keywords, OR
+        # 2. Has 1+ financial keyword AND matches question pattern
+        if keyword_count >= 2:
+            return True
+        if keyword_count >= 1 and is_question:
+            return True
+
+        return False
+
+    def extract_specific_date(self, text: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract specific date references from text.
+
+        Returns dict with 'type' and 'value' keys:
+        - type: 'relative' (last friday), 'specific' (2024-01-15), 'period' (last week)
+        - value: the extracted value
+        """
+        text_lower = text.lower()
+
+        # Check for day of week references (last friday, this monday, etc.)
+        days_of_week = {
+            'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+            'friday': 4, 'saturday': 5, 'sunday': 6
+        }
+
+        for day_name, day_num in days_of_week.items():
+            if day_name in text_lower:
+                # Determine if "last" or "this"
+                modifier = 'last' if 'last' in text_lower else 'this'
+                return {
+                    'type': 'day_of_week',
+                    'day': day_name,
+                    'day_num': day_num,
+                    'modifier': modifier
+                }
+
+        # Check for specific date patterns (not implemented for now)
+        # Could add: MM/DD/YYYY, YYYY-MM-DD, etc.
+
+        return None
 
     def _initialize_patterns(self) -> Dict[str, List[str]]:
         """Initialize regex patterns for intent recognition"""
@@ -436,19 +525,25 @@ class IntentService:
         if self.is_market_data_query(transcript):
             symbol = self.extract_symbol(transcript)
             period = self.extract_time_period(transcript)
+            specific_date = self.extract_specific_date(transcript)
 
             if symbol:
                 # Determine if it's a historical query or current price query
                 historical_keywords = {'range', 'week', 'month', 'last', 'history', 'historical', 'yesterday', 'daily', 'weekly', 'monthly'}
                 is_historical = any(kw in transcript.lower() for kw in historical_keywords)
 
+                # Check for specific date (like "last friday")
+                if specific_date:
+                    is_historical = True
+
                 if is_historical:
-                    logger.info(f"[ARIA] AI fallback detected historical query for {symbol}, period={period}")
+                    logger.info(f"[ARIA] AI fallback detected historical query for {symbol}, period={period}, specific_date={specific_date}")
                     return VoiceIntent(
                         type=IntentType.MARKET_HISTORICAL_QUERY.value,
                         parameters={
                             "symbol": symbol,
                             "period": period or "week",
+                            "specific_date": specific_date,
                             "raw_text": transcript
                         },
                         confidence=0.75,
@@ -465,6 +560,18 @@ class IntentService:
                         confidence=0.75,
                         requires_action=False
                     )
+
+        # Check for general financial/trading questions (LLM-powered)
+        if self.is_general_financial_query(transcript):
+            logger.info(f"[ARIA] Detected general financial query: '{transcript[:50]}...'")
+            return VoiceIntent(
+                type=IntentType.GENERAL_FINANCIAL_QUERY.value,
+                parameters={
+                    "raw_text": transcript
+                },
+                confidence=0.7,
+                requires_action=False
+            )
 
         # Check for greeting patterns more loosely
         greeting_words = {'hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'}

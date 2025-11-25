@@ -527,6 +527,10 @@ class ARIAAssistant:
         elif intent.type == "market_historical_query":
             return await self._generate_market_historical_response(intent, original_query)
 
+        # General financial/trading questions (LLM-powered)
+        elif intent.type == "general_financial_query":
+            return await self._generate_general_financial_response(user_context, intent, original_query)
+
         elif intent.type == "unknown":
             # Check if the unknown intent contains a symbol - if so, try to help with market data
             symbol = intent.parameters.get("symbol")
@@ -862,20 +866,11 @@ class ARIAAssistant:
         TEMPORARY: Generate market historical/range response using yfinance
 
         This will be migrated to atomik-data-hub once data sources are configured.
+        Supports specific day queries like "last Friday" as well as period queries.
         """
         symbol = intent.parameters.get("symbol", "").upper()
         period_raw = intent.parameters.get("period", "week").lower()
-
-        # Map period to yfinance format
-        period_map = {
-            "day": "1d",
-            "today": "1d",
-            "week": "1wk",
-            "weekly": "1wk",
-            "month": "1mo",
-            "monthly": "1mo"
-        }
-        period = period_map.get(period_raw, "1wk")
+        specific_date = intent.parameters.get("specific_date")
 
         if not symbol:
             return {
@@ -884,6 +879,71 @@ class ARIAAssistant:
             }
 
         try:
+            # Check if this is a specific day query (e.g., "last Friday")
+            if specific_date and specific_date.get("type") == "day_of_week":
+                day_name = specific_date.get("day", "friday")
+                modifier = specific_date.get("modifier", "last")
+
+                logger.info(f"[ARIA] Fetching specific day data: {modifier} {day_name} for {symbol}")
+                day_result = await self.market_data_service.get_specific_day_data(symbol, day_name, modifier)
+
+                if day_result.get("success"):
+                    data = day_result["data"]
+
+                    # Try to enhance with LLM for natural response
+                    if self.llm_service.client:
+                        try:
+                            llm_result = await self.llm_service.analyze_market_data(
+                                query=original_query,
+                                market_data={"price_data": {"data": data}}
+                            )
+                            if llm_result.get("success"):
+                                return {
+                                    "text": llm_result["text"],
+                                    "type": ARIAResponseType.TEXT.value,
+                                    "market_data": data,
+                                    "llm_enhanced": True,
+                                    "provider": llm_result.get("provider")
+                                }
+                        except Exception as e:
+                            logger.warning(f"LLM enhancement failed for specific day data: {e}")
+
+                    # Fallback to template response for specific day
+                    actual_day = data.get("actual_day", day_name.capitalize())
+                    actual_date = data.get("actual_date", "")
+                    open_price = data.get("open", 0)
+                    high = data.get("high", 0)
+                    low = data.get("low", 0)
+                    close = data.get("close", 0)
+                    volume = data.get("volume", 0)
+
+                    text = f"📊 {symbol} on {actual_day}, {actual_date}:\n"
+                    text += f"• Open: ${open_price:.2f}\n"
+                    text += f"• High: ${high:.2f}\n"
+                    text += f"• Low: ${low:.2f}\n"
+                    text += f"• Close: ${close:.2f}\n"
+                    text += f"• Volume: {volume:,}"
+
+                    return {
+                        "text": text,
+                        "type": ARIAResponseType.TEXT.value,
+                        "market_data": data
+                    }
+                else:
+                    # Fall back to period-based query if specific day fails
+                    logger.warning(f"Specific day query failed, falling back to period query: {day_result.get('error')}")
+
+            # Map period to yfinance format
+            period_map = {
+                "day": "1d",
+                "today": "1d",
+                "week": "1wk",
+                "weekly": "1wk",
+                "month": "1mo",
+                "monthly": "1mo"
+            }
+            period = period_map.get(period_raw, "1wk")
+
             # Fetch historical data from market data service
             hist_result = await self.market_data_service.get_historical(symbol, period)
 
@@ -918,7 +978,7 @@ class ARIAAssistant:
                 try:
                     llm_result = await self.llm_service.analyze_market_data(
                         query=original_query,
-                        market_data=data
+                        market_data={"price_data": {"data": data}}
                     )
                     if llm_result.get("success"):
                         return {
@@ -950,6 +1010,72 @@ class ARIAAssistant:
                 "type": ARIAResponseType.ERROR.value,
                 "error": str(e)
             }
+
+    async def _generate_general_financial_response(
+        self,
+        user_context: Dict[str, Any],
+        intent: VoiceIntent,
+        original_query: str
+    ) -> Dict[str, Any]:
+        """
+        Generate response for general financial/trading questions using LLM.
+
+        This handles questions like:
+        - "When is the market going to crash?"
+        - "What's the difference between a bull and bear market?"
+        - "How does inflation affect stocks?"
+        - "What is a put option?"
+        """
+        logger.info(f"[ARIA] Generating general financial response for: '{original_query[:50]}...'")
+
+        # Try LLM first for natural, helpful response
+        if self.llm_service.client:
+            try:
+                llm_result = await self.llm_service.analyze_market_data(
+                    query=original_query,
+                    user_context=user_context
+                )
+                if llm_result.get("success"):
+                    return {
+                        "text": llm_result["text"],
+                        "type": ARIAResponseType.TEXT.value,
+                        "llm_enhanced": True,
+                        "provider": llm_result.get("provider"),
+                        "query_type": "general_financial"
+                    }
+            except Exception as e:
+                logger.warning(f"LLM general financial response failed: {e}")
+
+        # Fallback response when LLM is not available
+        query_lower = original_query.lower()
+
+        # Try to provide helpful fallback based on common questions
+        if any(word in query_lower for word in ['crash', 'bubble', 'recession']):
+            return {
+                "text": "Market timing is notoriously difficult, and no one can reliably predict crashes. It's generally better to focus on your long-term investment strategy rather than trying to time market events. Is there something specific about your portfolio I can help you with?",
+                "type": ARIAResponseType.TEXT.value
+            }
+        elif any(word in query_lower for word in ['bull', 'bear']):
+            return {
+                "text": "A bull market is a period of rising prices and investor optimism, while a bear market sees prices declining at least 20% from recent highs. We appear to be in varied conditions depending on the asset class. Would you like me to check how any specific stocks are doing?",
+                "type": ARIAResponseType.TEXT.value
+            }
+        elif any(word in query_lower for word in ['inflation', 'fed', 'interest']):
+            return {
+                "text": "Interest rates and inflation significantly impact market valuations. Higher rates typically pressure growth stocks while potentially benefiting financials. For personalized analysis, I'd need to check your current positions. Want me to review your portfolio?",
+                "type": ARIAResponseType.TEXT.value
+            }
+        elif any(word in query_lower for word in ['option', 'put', 'call']):
+            return {
+                "text": "Options are contracts giving you the right (not obligation) to buy or sell at a set price. Calls profit when prices rise; puts profit when prices fall. Would you like me to explain any specific aspect of options trading?",
+                "type": ARIAResponseType.TEXT.value
+            }
+
+        # Generic fallback
+        return {
+            "text": "That's a great question about the markets. While I'd love to give you a detailed answer, my AI analysis is currently limited. You can ask me about specific stock prices, your positions, or strategy status. What would you like to know?",
+            "type": ARIAResponseType.TEXT.value
+        }
 
     async def _generate_smart_market_response(
         self,

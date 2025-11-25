@@ -213,6 +213,126 @@ class MarketDataService:
                 "data": None
             }
 
+    async def get_specific_day_data(
+        self,
+        symbol: str,
+        day_name: str,
+        modifier: str = "last"
+    ) -> Dict[str, Any]:
+        """
+        Get OHLC data for a specific day of the week.
+
+        Args:
+            symbol: Stock/ETF symbol
+            day_name: Day of week (monday, tuesday, etc.)
+            modifier: 'last' or 'this' (defaults to 'last')
+
+        Returns:
+            Dict with OHLC data for that specific day
+        """
+        try:
+            from datetime import date
+            import calendar
+
+            yf = _get_yfinance()
+
+            def fetch_specific_day():
+                today = date.today()
+                today_weekday = today.weekday()
+
+                # Map day names to weekday numbers (0=Monday, 6=Sunday)
+                days_map = {
+                    'monday': 0, 'tuesday': 1, 'wednesday': 2,
+                    'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
+                }
+
+                target_weekday = days_map.get(day_name.lower(), 4)  # Default to Friday
+
+                # Calculate days to go back
+                if modifier == 'last':
+                    # Go back to the most recent occurrence
+                    days_back = (today_weekday - target_weekday) % 7
+                    if days_back == 0:
+                        days_back = 7  # If today is the target day, go back a week
+                else:  # 'this' week
+                    days_back = (today_weekday - target_weekday) % 7
+
+                target_date = today - timedelta(days=days_back)
+
+                # Fetch data for that specific day (need to get a range and filter)
+                # Get 2 weeks of data to ensure we have the target day
+                start_date = target_date - timedelta(days=3)
+                end_date = target_date + timedelta(days=1)
+
+                ticker = yf.Ticker(symbol.upper())
+                hist = ticker.history(start=start_date.isoformat(), end=end_date.isoformat())
+
+                if hist.empty:
+                    return None
+
+                # Find the row closest to target_date
+                # Convert index to date for comparison
+                hist.index = hist.index.tz_localize(None)
+
+                target_datetime = datetime.combine(target_date, datetime.min.time())
+
+                # Find closest date (market might be closed on target day)
+                closest_idx = None
+                min_diff = float('inf')
+
+                for idx in hist.index:
+                    diff = abs((idx.date() - target_date).days)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_idx = idx
+
+                if closest_idx is None:
+                    return None
+
+                row = hist.loc[closest_idx]
+                actual_date = closest_idx.strftime("%Y-%m-%d")
+                actual_day = closest_idx.strftime("%A")
+
+                return {
+                    "symbol": symbol.upper(),
+                    "requested_day": day_name.capitalize(),
+                    "actual_date": actual_date,
+                    "actual_day": actual_day,
+                    "open": round(row['Open'], 2),
+                    "high": round(row['High'], 2),
+                    "low": round(row['Low'], 2),
+                    "close": round(row['Close'], 2),
+                    "volume": int(row['Volume']),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source": "yfinance",
+                    "note": f"Data for {actual_day}, {actual_date}" + (
+                        f" (closest to requested {day_name.capitalize()})" if actual_day.lower() != day_name.lower() else ""
+                    )
+                }
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, fetch_specific_day)
+
+            if result is None:
+                return {
+                    "success": False,
+                    "error": f"No data found for {symbol} on {modifier} {day_name}",
+                    "data": None
+                }
+
+            return {
+                "success": True,
+                "data": result
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching specific day data for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
     async def get_company_info(self, symbol: str) -> Dict[str, Any]:
         """
         Get basic company information
