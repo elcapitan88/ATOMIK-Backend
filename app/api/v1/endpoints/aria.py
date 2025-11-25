@@ -58,18 +58,24 @@ async def aria_chat(
 ):
     """
     Main ARIA chat endpoint for text and voice interactions
-    
+
     Process user input and return ARIA's response with any actions taken
     """
+    logger.info(f"[ARIA] Chat request received from user {current_user.id}: '{request.message[:100]}...' (type: {request.input_type})")
+
     try:
         aria = ARIAAssistant(db)
-        
+
+        logger.info(f"[ARIA] Processing input for user {current_user.id}...")
         result = await aria.process_user_input(
             user_id=current_user.id,
             input_text=request.message,
             input_type=request.input_type
         )
-        
+
+        logger.info(f"[ARIA] Response generated for user {current_user.id}: success={result.get('success')}, interaction_id={result.get('interaction_id')}")
+        logger.info(f"[ARIA] Response text: '{result.get('response', {}).get('text', 'N/A')[:100]}...'")
+
         return ARIAResponse(
             success=result["success"],
             response=result["response"],
@@ -79,9 +85,9 @@ async def aria_chat(
             processing_time_ms=result.get("processing_time_ms"),
             error=result.get("error")
         )
-        
+
     except Exception as e:
-        logger.error(f"ARIA chat error for user {current_user.id}: {str(e)}")
+        logger.error(f"[ARIA] Chat error for user {current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"ARIA processing failed: {str(e)}"
@@ -96,14 +102,18 @@ async def aria_voice_command(
     """
     Specialized endpoint for voice commands with optimized processing
     """
+    logger.info(f"[ARIA] Voice command received from user {current_user.id}: '{request.message[:100]}...'")
+
     try:
         aria = ARIAAssistant(db)
-        
+
         result = await aria.execute_voice_command(
             user_id=current_user.id,
             command=request.message
         )
-        
+
+        logger.info(f"[ARIA] Voice response for user {current_user.id}: success={result.get('success')}")
+
         return ARIAResponse(
             success=result["success"],
             response=result["response"],
@@ -113,9 +123,9 @@ async def aria_voice_command(
             processing_time_ms=result.get("processing_time_ms"),
             error=result.get("error")
         )
-        
+
     except Exception as e:
-        logger.error(f"ARIA voice command error for user {current_user.id}: {str(e)}")
+        logger.error(f"[ARIA] Voice command error for user {current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Voice command processing failed: {str(e)}"
@@ -130,24 +140,28 @@ async def aria_confirmation(
     """
     Handle user confirmations for pending actions
     """
+    logger.info(f"[ARIA] Confirmation received from user {current_user.id}: interaction_id={request.interaction_id}, confirmed={request.confirmed}")
+
     try:
         aria = ARIAAssistant(db)
-        
+
         result = await aria.handle_confirmation_response(
             user_id=current_user.id,
             interaction_id=request.interaction_id,
             confirmed=request.confirmed
         )
-        
+
+        logger.info(f"[ARIA] Confirmation processed for user {current_user.id}: success={result.get('success')}")
+
         return ARIAResponse(
             success=result["success"],
             response=result["response"],
             action_result=result.get("action_result"),
             error=result.get("error")
         )
-        
+
     except Exception as e:
-        logger.error(f"ARIA confirmation error for user {current_user.id}: {str(e)}")
+        logger.error(f"[ARIA] Confirmation error for user {current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Confirmation processing failed: {str(e)}"

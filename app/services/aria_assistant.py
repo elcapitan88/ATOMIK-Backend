@@ -54,39 +54,46 @@ class ARIAAssistant:
         self.action_executor = ARIAActionExecutor(db)
         
     async def process_user_input(
-        self, 
-        user_id: int, 
-        input_text: str, 
+        self,
+        user_id: int,
+        input_text: str,
         input_type: str = "text"
     ) -> Dict[str, Any]:
         """
         Main entry point for all ARIA interactions
-        
+
         Args:
             user_id: User's database ID
             input_text: Raw user input (voice transcript or typed text)
             input_type: "voice" or "text"
-            
+
         Returns:
             Complete response with action results and ARIA reply
         """
         interaction_start = datetime.utcnow()
-        
+        logger.info(f"[ARIA] process_user_input started for user {user_id}: '{input_text[:100]}...'")
+
         try:
             # 1. Get or create user trading profile
+            logger.info(f"[ARIA] Step 1: Getting user profile for user {user_id}")
             user_profile = await self._get_or_create_user_profile(user_id)
-            
+
             # 2. Get comprehensive user context
+            logger.info(f"[ARIA] Step 2: Getting user context for user {user_id}")
             user_context = await self.context_engine.get_user_context(user_id)
-            
+
             # 3. Process intent from user input
+            logger.info(f"[ARIA] Step 3: Parsing intent from input")
             intent = await self.intent_service.parse_voice_command(input_text)
-            
+            logger.info(f"[ARIA] Intent detected: type={intent.type}, confidence={intent.confidence}, params={intent.parameters}")
+
             # 4. Determine risk level and confirmation requirements
             risk_level = self._assess_risk_level(intent, user_context)
             requires_confirmation = self._requires_confirmation(intent, risk_level)
+            logger.info(f"[ARIA] Risk assessment: level={risk_level.value}, requires_confirmation={requires_confirmation}")
             
             # 5. Create interaction record
+            logger.info(f"[ARIA] Step 5: Creating interaction record")
             interaction = await self._create_interaction_record(
                 user_profile.id,
                 input_text,
@@ -95,34 +102,43 @@ class ARIAAssistant:
                 risk_level,
                 requires_confirmation
             )
-            
+            logger.info(f"[ARIA] Interaction record created: id={interaction.id}")
+
             # 6. Handle confirmation flow if needed
             if requires_confirmation and not intent.confirmed:
+                logger.info(f"[ARIA] Step 6: Confirmation required, returning confirmation request")
                 return await self._handle_confirmation_request(interaction, intent, user_context)
-            
+
             # 7. Execute action if required
             action_result = None
             if intent.requires_action:
+                logger.info(f"[ARIA] Step 7: Executing action for intent type={intent.type}")
                 action_result = await self.action_executor.execute_action(
                     user_id, intent, user_context
                 )
-                
+                logger.info(f"[ARIA] Action result: success={action_result.get('success')}")
+
                 # Update interaction with action results
                 await self._update_interaction_action_result(
                     interaction, action_result
                 )
-            
+
             # 8. Generate ARIA response
+            logger.info(f"[ARIA] Step 8: Generating ARIA response")
             response = await self._generate_aria_response(
                 user_context, intent, action_result, input_type
             )
-            
+            logger.info(f"[ARIA] Response generated: '{response.get('text', 'N/A')[:100]}...'")
+
             # 9. Update interaction with response
             await self._update_interaction_response(interaction, response)
-            
+
             # 10. Update user context cache
             await self.context_engine.update_context_cache(user_id)
-            
+
+            processing_time = int((datetime.utcnow() - interaction_start).total_seconds() * 1000)
+            logger.info(f"[ARIA] Processing complete for user {user_id} in {processing_time}ms")
+
             return {
                 "success": True,
                 "interaction_id": interaction.id,
@@ -130,11 +146,11 @@ class ARIAAssistant:
                 "action_result": action_result,
                 "requires_confirmation": False,
                 "risk_level": risk_level.value,
-                "processing_time_ms": int((datetime.utcnow() - interaction_start).total_seconds() * 1000)
+                "processing_time_ms": processing_time
             }
-            
+
         except Exception as e:
-            logger.error(f"ARIA processing error for user {user_id}: {str(e)}")
+            logger.error(f"[ARIA] Processing error for user {user_id}: {str(e)}")
             
             # Create error interaction record
             error_interaction = await self._create_error_interaction(
@@ -163,21 +179,24 @@ class ARIAAssistant:
         return await self.process_user_input(user_id, command, "voice")
     
     async def handle_confirmation_response(
-        self, 
-        user_id: int, 
-        interaction_id: int, 
+        self,
+        user_id: int,
+        interaction_id: int,
         confirmed: bool
     ) -> Dict[str, Any]:
         """
         Handle user's response to a confirmation request
         """
+        logger.info(f"[ARIA] handle_confirmation_response: user={user_id}, interaction={interaction_id}, confirmed={confirmed}")
+
         try:
             # Get original interaction
             interaction = self.db.query(ARIAInteraction).filter(
                 ARIAInteraction.id == interaction_id
             ).first()
-            
+
             if not interaction:
+                logger.error(f"[ARIA] Interaction {interaction_id} not found")
                 raise ValueError(f"Interaction {interaction_id} not found")
             
             # Update confirmation status
