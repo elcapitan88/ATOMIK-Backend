@@ -329,7 +329,9 @@ class StrategyResponse(BaseModel):
     """Schema for strategy response to client"""
     id: int
     strategy_type: StrategyType
-    webhook_id: str = Field(..., description="Webhook token")
+    webhook_id: Optional[str] = Field(None, description="Webhook token (null for engine strategies)")
+    strategy_code_id: Optional[int] = Field(None, description="Strategy code ID (for engine strategies)")
+    execution_type: Optional[str] = Field("webhook", description="Execution type: webhook or engine")
     ticker: str
     is_active: bool
     created_at: datetime
@@ -380,9 +382,11 @@ class StrategyResponse(BaseModel):
     last_scheduled_toggle: Optional[datetime] = Field(None, description="Last automated toggle")
 
     @validator('webhook_id')
-    def validate_webhook_id(cls, v):
-        if not v:
-            raise ValueError('webhook_id cannot be empty')
+    def validate_webhook_id(cls, v, values):
+        # webhook_id can be None for engine strategies
+        # Only validate if execution_type is 'webhook' and webhook_id is provided but empty string
+        if v is not None and v.strip() == '':
+            raise ValueError('webhook_id cannot be an empty string')
         return v
 
     @validator('ticker')
