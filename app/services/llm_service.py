@@ -348,15 +348,36 @@ class LLMService:
             if "price_data" in market_data:
                 price = market_data["price_data"].get("data", {})
                 if price:
-                    prompt_parts.append(f"Price: ${price.get('price', 'N/A')}")
-                    prompt_parts.append(f"Change: {price.get('change', 0):+.2f} ({price.get('change_percent', 0):+.2f}%)")
-                    prompt_parts.append(f"Volume: {price.get('volume', 'N/A'):,}")
+                    symbol = price.get('symbol', 'Unknown')
+                    prompt_parts.append(f"Symbol: {symbol}")
+                    prompt_parts.append(f"Current Price: ${price.get('price', 0):.2f}")
+                    change = price.get('change', 0)
+                    change_pct = price.get('change_percent', 0)
+                    prompt_parts.append(f"Today's Change: ${change:+.2f} ({change_pct:+.2f}%)")
+                    prompt_parts.append(f"Day High: ${price.get('day_high', 0):.2f}")
+                    prompt_parts.append(f"Day Low: ${price.get('day_low', 0):.2f}")
+                    prompt_parts.append(f"Open: ${price.get('open', 0):.2f}")
+                    prompt_parts.append(f"Previous Close: ${price.get('previous_close', 0):.2f}")
+                    vol = price.get('volume', 0)
+                    if vol:
+                        prompt_parts.append(f"Volume: {vol:,}")
+
+                    # Add historical data if present
+                    historical = price.get('historical', {})
+                    if historical:
+                        prompt_parts.append("\n--- Historical Data ---")
+                        prompt_parts.append(f"Period: {historical.get('period', 'N/A')}")
+                        prompt_parts.append(f"Period High: ${historical.get('high', 0):.2f}")
+                        prompt_parts.append(f"Period Low: ${historical.get('low', 0):.2f}")
+                        prompt_parts.append(f"Period Range: ${historical.get('range', 0):.2f}")
+                        prompt_parts.append(f"Period Change: ${historical.get('period_change', 0):.2f} ({historical.get('period_change_percent', 0):+.2f}%)")
+                        prompt_parts.append(f"Date Range: {historical.get('start_date', 'N/A')} to {historical.get('end_date', 'N/A')}")
 
             if "sentiment" in market_data:
                 sentiment = market_data["sentiment"].get("data", {})
                 if sentiment:
                     overall = sentiment.get("overall_sentiment", {})
-                    prompt_parts.append(f"Sentiment: {overall.get('label', 'N/A')} (score: {overall.get('score', 0):.2f})")
+                    prompt_parts.append(f"\nSentiment: {overall.get('label', 'N/A')} (score: {overall.get('score', 0):.2f})")
 
             if "news" in market_data:
                 news = market_data["news"].get("data", {})
@@ -367,20 +388,32 @@ class LLMService:
         if user_context:
             prompt_parts.append("\n--- User Context ---")
 
-            if "positions" in user_context:
-                positions = user_context["positions"]
-                if positions:
-                    prompt_parts.append(f"Current Positions: {len(positions)}")
-                    for symbol, data in list(positions.items())[:3]:  # Top 3
-                        prompt_parts.append(f"  {symbol}: {data.get('quantity', 0)} shares")
+            # Handle nested structure from context engine
+            positions_data = user_context.get("current_positions", {})
+            positions = positions_data.get("positions", {}) if isinstance(positions_data, dict) else {}
 
-            if "risk_tolerance" in user_context:
-                prompt_parts.append(f"Risk Profile: {user_context['risk_tolerance']}")
+            if positions:
+                prompt_parts.append(f"Current Positions: {len(positions)}")
+                for symbol, data in list(positions.items())[:3]:  # Top 3
+                    if isinstance(data, dict):
+                        prompt_parts.append(f"  {symbol}: {data.get('quantity', 0)} shares @ ${data.get('avg_price', 0):.2f}")
+
+            # Risk tolerance from preferences
+            preferences = user_context.get("preferences", {})
+            if "risk_tolerance" in preferences:
+                prompt_parts.append(f"Risk Profile: {preferences['risk_tolerance']}")
+
+            # Performance summary
+            performance = user_context.get("performance_summary", {})
+            if performance:
+                daily_pnl = performance.get("daily_pnl", 0)
+                if daily_pnl:
+                    prompt_parts.append(f"Today's P&L: ${daily_pnl:+,.2f}")
 
             if "account_value" in user_context:
                 prompt_parts.append(f"Account Value: ${user_context['account_value']:,.2f}")
 
-        prompt_parts.append("\nProvide analysis based on the above data.")
+        prompt_parts.append("\nProvide a helpful, conversational response based on the above data. Answer the user's specific question directly.")
 
         return "\n".join(prompt_parts)
 

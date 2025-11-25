@@ -528,6 +528,11 @@ class ARIAAssistant:
             return await self._generate_market_historical_response(intent, original_query)
 
         elif intent.type == "unknown":
+            # Check if the unknown intent contains a symbol - if so, try to help with market data
+            symbol = intent.parameters.get("symbol")
+            if symbol:
+                logger.info(f"[ARIA] Unknown intent contains symbol {symbol}, attempting market data fetch")
+                return await self._generate_smart_market_response(symbol, original_query, user_context)
             # Use LLM to handle unknown intents conversationally
             return await self._generate_conversational_response(user_context, intent, input_type, original_query)
 
@@ -942,6 +947,111 @@ class ARIAAssistant:
             logger.error(f"Market historical query error: {e}")
             return {
                 "text": f"I encountered an error fetching {symbol} historical data. Please try again.",
+                "type": ARIAResponseType.ERROR.value,
+                "error": str(e)
+            }
+
+    async def _generate_smart_market_response(
+        self,
+        symbol: str,
+        original_query: str,
+        user_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Generate intelligent market response for unknown intents containing symbols.
+
+        Fetches market data and uses LLM to provide a helpful response.
+        """
+        try:
+            logger.info(f"[ARIA] Smart market response for symbol: {symbol}")
+
+            # Fetch current quote data
+            quote_result = await self.market_data_service.get_quote(symbol)
+
+            if not quote_result.get("success"):
+                # Symbol might not be valid, fall back to conversational
+                return {
+                    "text": f"I couldn't find market data for '{symbol}'. Please check the symbol and try again. You can use the $ prefix for clarity, e.g., $SPY or $AAPL.",
+                    "type": ARIAResponseType.TEXT.value
+                }
+
+            market_data = quote_result.get("data", {})
+
+            # Check if we should also get historical data based on query
+            historical_keywords = {'range', 'week', 'month', 'last', 'history', 'historical', 'yesterday', 'movement'}
+            if any(kw in original_query.lower() for kw in historical_keywords):
+                # Determine period
+                period = "1wk"  # Default
+                if 'month' in original_query.lower():
+                    period = "1mo"
+                elif 'day' in original_query.lower() or 'yesterday' in original_query.lower():
+                    period = "1d"
+
+                hist_result = await self.market_data_service.get_historical(symbol, period)
+                if hist_result.get("success"):
+                    market_data["historical"] = hist_result.get("data", {})
+
+            # Try to use LLM to generate intelligent response
+            if self.llm_service.client:
+                try:
+                    llm_result = await self.llm_service.analyze_market_data(
+                        query=original_query,
+                        market_data={"price_data": {"data": market_data}},
+                        user_context=user_context
+                    )
+                    if llm_result.get("success"):
+                        return {
+                            "text": llm_result["text"],
+                            "type": ARIAResponseType.TEXT.value,
+                            "market_data": market_data,
+                            "llm_enhanced": True,
+                            "provider": llm_result.get("provider")
+                        }
+                except Exception as e:
+                    logger.warning(f"LLM enhancement failed for smart response: {e}")
+
+            # Fallback to formatted template response
+            price = market_data.get("price", 0)
+            change = market_data.get("change", 0)
+            change_pct = market_data.get("change_percent", 0)
+            high = market_data.get("day_high", 0)
+            low = market_data.get("day_low", 0)
+
+            # Determine emoji and direction
+            if change > 0:
+                emoji = "📈"
+                direction = "up"
+            elif change < 0:
+                emoji = "📉"
+                direction = "down"
+            else:
+                emoji = "➡️"
+                direction = "flat"
+
+            text = f"{emoji} {symbol} is currently at ${price:.2f}, {direction} ${abs(change):.2f} ({change_pct:+.2f}%) today."
+
+            if high and low:
+                text += f" Day range: ${low:.2f} - ${high:.2f}."
+
+            # Add historical summary if available
+            if "historical" in market_data:
+                hist = market_data["historical"]
+                hist_change = hist.get("period_change", 0)
+                hist_change_pct = hist.get("period_change_percent", 0)
+                hist_high = hist.get("high", 0)
+                hist_low = hist.get("low", 0)
+                text += f" Weekly range: ${hist_low:.2f} - ${hist_high:.2f} ({hist_change_pct:+.2f}% over the period)."
+
+            return {
+                "text": text,
+                "type": ARIAResponseType.TEXT.value,
+                "market_data": market_data
+            }
+
+        except Exception as e:
+            logger.error(f"Smart market response error: {e}")
+            return {
+                "text": f"I encountered an error looking up {symbol}. Please try again or rephrase your question.",
                 "type": ARIAResponseType.ERROR.value,
                 "error": str(e)
             }

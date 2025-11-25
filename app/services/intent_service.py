@@ -1,11 +1,38 @@
 # app/services/intent_service.py
 import re
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+# Common stock/ETF symbols for recognition
+COMMON_SYMBOLS = {
+    # Major ETFs
+    'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'VXX', 'UVXY',
+    # Leveraged ETFs
+    'SQQQ', 'TQQQ', 'SPXS', 'SPXL', 'UPRO', 'SDOW', 'UDOW',
+    # Tech Giants
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'TSLA', 'META', 'NVDA', 'AMD', 'INTC', 'NFLX',
+    # Finance
+    'JPM', 'BAC', 'WFC', 'GS', 'V', 'MA', 'PYPL', 'SQ', 'COIN',
+    # Energy
+    'XOM', 'CVX', 'COP',
+    # Other popular
+    'BABA', 'NIO', 'PLTR', 'SOFI', 'RIVN', 'LCID',
+    # Futures (common symbols)
+    'ES', 'NQ', 'MES', 'MNQ', 'RTY', 'YM', 'CL', 'GC', 'SI', 'ZB', 'ZN'
+}
+
+# Market data related keywords
+MARKET_KEYWORDS = {
+    'price', 'trading', 'quote', 'doing', 'movement', 'moving', 'move',
+    'up', 'down', 'green', 'red', 'positive', 'negative', 'flat',
+    'range', 'high', 'low', 'open', 'close', 'volume',
+    'today', 'yesterday', 'week', 'month', 'daily', 'weekly', 'monthly',
+    'performance', 'performing', 'change', 'changed', 'percent'
+}
 
 @dataclass
 class VoiceIntent:
@@ -41,7 +68,98 @@ class IntentService:
     def __init__(self):
         self.intent_patterns = self._initialize_patterns()
         self.confidence_threshold = 0.7
-    
+
+    def extract_symbol(self, text: str) -> Optional[str]:
+        """
+        Extract stock/ETF symbol from text.
+        Handles: $SPY, $spy, SPY, spy, "spy", etc.
+
+        Args:
+            text: Raw user input text
+
+        Returns:
+            Uppercase symbol if found, None otherwise
+        """
+        # Pattern 1: $SYMBOL format (highest priority - explicit ticker notation)
+        dollar_match = re.search(r'\$([a-zA-Z]{1,5})\b', text)
+        if dollar_match:
+            symbol = dollar_match.group(1).upper()
+            logger.debug(f"Extracted symbol from $ notation: {symbol}")
+            return symbol
+
+        # Pattern 2: Check for known symbols (case-insensitive)
+        words = re.findall(r'\b[a-zA-Z]{1,5}\b', text)
+        for word in words:
+            if word.upper() in COMMON_SYMBOLS:
+                logger.debug(f"Extracted known symbol: {word.upper()}")
+                return word.upper()
+
+        # Pattern 3: Look for potential symbols near market keywords
+        text_lower = text.lower()
+        for keyword in MARKET_KEYWORDS:
+            if keyword in text_lower:
+                # Find 1-5 letter words that could be symbols
+                potential_symbols = re.findall(r'\b([a-zA-Z]{2,5})\b', text_lower)
+                for sym in potential_symbols:
+                    sym_upper = sym.upper()
+                    # Skip common English words
+                    skip_words = {
+                        'THE', 'AND', 'FOR', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN',
+                        'HAD', 'HER', 'WAS', 'ONE', 'OUR', 'OUT', 'DAY', 'GET', 'HAS',
+                        'HIM', 'HIS', 'HOW', 'ITS', 'LET', 'MAY', 'NEW', 'NOW', 'OLD',
+                        'SEE', 'WAY', 'WHO', 'BOY', 'DID', 'SAY', 'SHE', 'TOO', 'USE',
+                        'WHAT', 'LAST', 'WEEK', 'THIS', 'THAT', 'WITH', 'HAVE', 'FROM',
+                        'THEY', 'BEEN', 'CALL', 'WILL', 'EACH', 'MAKE', 'LIKE', 'TIME',
+                        'VERY', 'WHEN', 'COME', 'MADE', 'FIND', 'TELL', 'ARIA', 'RANG',
+                        'RANGE', 'PRICE', 'TODAY', 'ABOUT', 'DOING', 'HELLO', 'COULD',
+                        'TELL', 'MOVE', 'MOVEMENT', 'TRADING', 'STOCK', 'MARKET'
+                    }
+                    if sym_upper not in skip_words:
+                        logger.debug(f"Extracted potential symbol near keyword '{keyword}': {sym_upper}")
+                        return sym_upper
+
+        return None
+
+    def extract_time_period(self, text: str) -> Optional[str]:
+        """
+        Extract time period from text.
+
+        Returns: 'today', 'week', 'month', 'day', or None
+        """
+        text_lower = text.lower()
+
+        if 'today' in text_lower or 'this morning' in text_lower:
+            return 'today'
+        elif 'yesterday' in text_lower:
+            return 'day'
+        elif 'last week' in text_lower or 'this week' in text_lower or 'weekly' in text_lower:
+            return 'week'
+        elif 'last month' in text_lower or 'this month' in text_lower or 'monthly' in text_lower:
+            return 'month'
+        elif 'daily' in text_lower:
+            return 'day'
+
+        return None
+
+    def is_market_data_query(self, text: str) -> bool:
+        """
+        Check if the text appears to be a market data query.
+        """
+        text_lower = text.lower()
+
+        # Check for $ symbol notation (definitive market query)
+        if '$' in text:
+            return True
+
+        # Check for market keywords + potential symbol
+        keyword_count = sum(1 for kw in MARKET_KEYWORDS if kw in text_lower)
+        if keyword_count >= 1:
+            # Also check if there's a potential symbol
+            if self.extract_symbol(text):
+                return True
+
+        return False
+
     def _initialize_patterns(self) -> Dict[str, List[str]]:
         """Initialize regex patterns for intent recognition"""
         return {
@@ -311,16 +429,62 @@ class IntentService:
     async def _ai_intent_recognition(self, transcript: str) -> VoiceIntent:
         """
         Fallback AI-based intent recognition for complex queries
-        
-        This would integrate with Claude/DeepSeek for sophisticated parsing
-        Currently returns a placeholder - implement with actual AI service
+
+        Uses symbol extraction and market keyword detection when patterns fail.
         """
-        # TODO: Integrate with actual AI service (Claude/DeepSeek)
-        # For now, return unknown intent with low confidence
-        
+        # Try to detect if this is a market data query using our helpers
+        if self.is_market_data_query(transcript):
+            symbol = self.extract_symbol(transcript)
+            period = self.extract_time_period(transcript)
+
+            if symbol:
+                # Determine if it's a historical query or current price query
+                historical_keywords = {'range', 'week', 'month', 'last', 'history', 'historical', 'yesterday', 'daily', 'weekly', 'monthly'}
+                is_historical = any(kw in transcript.lower() for kw in historical_keywords)
+
+                if is_historical:
+                    logger.info(f"[ARIA] AI fallback detected historical query for {symbol}, period={period}")
+                    return VoiceIntent(
+                        type=IntentType.MARKET_HISTORICAL_QUERY.value,
+                        parameters={
+                            "symbol": symbol,
+                            "period": period or "week",
+                            "raw_text": transcript
+                        },
+                        confidence=0.75,
+                        requires_action=False
+                    )
+                else:
+                    logger.info(f"[ARIA] AI fallback detected price query for {symbol}")
+                    return VoiceIntent(
+                        type=IntentType.MARKET_PRICE_QUERY.value,
+                        parameters={
+                            "symbol": symbol,
+                            "raw_text": transcript
+                        },
+                        confidence=0.75,
+                        requires_action=False
+                    )
+
+        # Check for greeting patterns more loosely
+        greeting_words = {'hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'}
+        if any(greet in transcript.lower() for greet in greeting_words):
+            return VoiceIntent(
+                type=IntentType.GREETING.value,
+                parameters={},
+                confidence=0.6,
+                requires_action=False
+            )
+
+        # Default unknown intent - but still extract symbol if present for context
+        symbol = self.extract_symbol(transcript)
+        parameters = {"raw_text": transcript}
+        if symbol:
+            parameters["symbol"] = symbol
+
         return VoiceIntent(
             type=IntentType.UNKNOWN.value,
-            parameters={"raw_text": transcript},
+            parameters=parameters,
             confidence=0.1,
             requires_action=False
         )

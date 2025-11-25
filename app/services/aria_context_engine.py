@@ -231,18 +231,23 @@ class ARIAContextEngine:
             
             strategy_list = []
             for strategy in strategies:
+                # Build strategy name from available fields
+                strategy_name = strategy.group_name or f"{strategy.ticker} Strategy"
                 strategy_list.append({
                     "id": strategy.id,
-                    "name": strategy.name,
+                    "name": strategy_name,
+                    "ticker": strategy.ticker,
                     "description": strategy.description or "",
                     "is_active": strategy.is_active,
-                    "broker": strategy.broker,
+                    "broker": strategy.broker_id,  # Use broker_id, not broker
+                    "execution_type": strategy.execution_type,
                     "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
                     "last_updated": strategy.updated_at.isoformat() if strategy.updated_at else None,
-                    # Add performance metrics (would come from strategy execution tracking)
-                    "trades_today": 0,  # Placeholder
+                    # Add performance metrics from strategy model
+                    "trades_today": 0,  # Placeholder - would track daily
                     "daily_pnl": 0.0,   # Placeholder
-                    "win_rate": 0.0     # Placeholder
+                    "total_trades": strategy.total_trades or 0,
+                    "win_rate": float(strategy.win_rate) if strategy.win_rate else 0.0
                 })
             
             return strategy_list
@@ -353,13 +358,17 @@ class ARIAContextEngine:
             
             broker_status = {}
             for account in broker_accounts:
-                broker_status[account.broker] = {
-                    "connected": True,  # Would check actual API connection
+                broker_key = account.broker_id or f"account_{account.id}"
+                broker_status[broker_key] = {
+                    "connected": account.is_active,
                     "account_id": account.account_id,
-                    "nickname": getattr(account, 'nickname', None),
-                    "last_sync": datetime.utcnow().isoformat(),  # Would track actual sync
-                    "trading_enabled": True,  # Would check account permissions
-                    "market_data_connected": True
+                    "name": account.name,
+                    "nickname": account.nickname,
+                    "environment": account.environment,
+                    "status": account.status,
+                    "last_sync": account.last_connected.isoformat() if account.last_connected else None,
+                    "trading_enabled": account.is_active and account.status == 'active',
+                    "market_data_connected": account.is_active
                 }
             
             return broker_status
