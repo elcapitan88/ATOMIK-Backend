@@ -1,4 +1,5 @@
 # app/api/v1/endpoints/aria.py
+# ARIA Assistant API endpoints with comprehensive logging
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
