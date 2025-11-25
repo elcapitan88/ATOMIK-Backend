@@ -2,6 +2,7 @@
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel, Field
 import logging
 
@@ -239,7 +240,7 @@ async def aria_health_check(
     """
     try:
         # Test database connection
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
 
         # Test ARIA service initialization
         aria = ARIAAssistant(db)
