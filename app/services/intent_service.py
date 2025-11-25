@@ -520,48 +520,79 @@ class IntentService:
         Fallback AI-based intent recognition for complex queries
 
         Uses symbol extraction and market keyword detection when patterns fail.
+        Priority order:
+        1. Market data queries with explicit $ symbol (highest confidence)
+        2. Market data queries with known symbols from COMMON_SYMBOLS
+        3. General financial questions (LLM-powered)
+        4. Market data queries with potentially extracted symbols
         """
-        # Try to detect if this is a market data query using our helpers
-        if self.is_market_data_query(transcript):
-            symbol = self.extract_symbol(transcript)
-            period = self.extract_time_period(transcript)
-            specific_date = self.extract_specific_date(transcript)
+        # First, check for explicit $ symbol notation (highest priority - user clearly wants ticker data)
+        has_dollar_symbol = '$' in transcript
 
+        if has_dollar_symbol:
+            symbol = self.extract_symbol(transcript)
             if symbol:
-                # Determine if it's a historical query or current price query
+                period = self.extract_time_period(transcript)
+                specific_date = self.extract_specific_date(transcript)
+
                 historical_keywords = {'range', 'week', 'month', 'last', 'history', 'historical', 'yesterday', 'daily', 'weekly', 'monthly'}
                 is_historical = any(kw in transcript.lower() for kw in historical_keywords)
-
-                # Check for specific date (like "last friday")
                 if specific_date:
                     is_historical = True
 
                 if is_historical:
-                    logger.info(f"[ARIA] AI fallback detected historical query for {symbol}, period={period}, specific_date={specific_date}")
+                    logger.info(f"[ARIA] Explicit $ detected historical query for {symbol}")
                     return VoiceIntent(
                         type=IntentType.MARKET_HISTORICAL_QUERY.value,
-                        parameters={
-                            "symbol": symbol,
-                            "period": period or "week",
-                            "specific_date": specific_date,
-                            "raw_text": transcript
-                        },
-                        confidence=0.75,
+                        parameters={"symbol": symbol, "period": period or "week", "specific_date": specific_date, "raw_text": transcript},
+                        confidence=0.85,
                         requires_action=False
                     )
                 else:
-                    logger.info(f"[ARIA] AI fallback detected price query for {symbol}")
+                    logger.info(f"[ARIA] Explicit $ detected price query for {symbol}")
                     return VoiceIntent(
                         type=IntentType.MARKET_PRICE_QUERY.value,
-                        parameters={
-                            "symbol": symbol,
-                            "raw_text": transcript
-                        },
-                        confidence=0.75,
+                        parameters={"symbol": symbol, "raw_text": transcript},
+                        confidence=0.85,
                         requires_action=False
                     )
 
-        # Check for general financial/trading questions (LLM-powered)
+        # Check for known symbols from COMMON_SYMBOLS (high confidence - recognized tickers)
+        words = re.findall(r'\b[a-zA-Z]{1,5}\b', transcript)
+        known_symbol = None
+        for word in words:
+            if word.upper() in COMMON_SYMBOLS:
+                known_symbol = word.upper()
+                break
+
+        if known_symbol:
+            period = self.extract_time_period(transcript)
+            specific_date = self.extract_specific_date(transcript)
+
+            historical_keywords = {'range', 'week', 'month', 'last', 'history', 'historical', 'yesterday', 'daily', 'weekly', 'monthly'}
+            is_historical = any(kw in transcript.lower() for kw in historical_keywords)
+            if specific_date:
+                is_historical = True
+
+            if is_historical:
+                logger.info(f"[ARIA] Known symbol detected historical query for {known_symbol}")
+                return VoiceIntent(
+                    type=IntentType.MARKET_HISTORICAL_QUERY.value,
+                    parameters={"symbol": known_symbol, "period": period or "week", "specific_date": specific_date, "raw_text": transcript},
+                    confidence=0.8,
+                    requires_action=False
+                )
+            else:
+                logger.info(f"[ARIA] Known symbol detected price query for {known_symbol}")
+                return VoiceIntent(
+                    type=IntentType.MARKET_PRICE_QUERY.value,
+                    parameters={"symbol": known_symbol, "raw_text": transcript},
+                    confidence=0.8,
+                    requires_action=False
+                )
+
+        # Check for general financial/trading questions BEFORE trying to extract unknown symbols
+        # This prevents "is the market bullish" from being parsed as "IS" ticker query
         if self.is_general_financial_query(transcript):
             logger.info(f"[ARIA] Detected general financial query: '{transcript[:50]}...'")
             return VoiceIntent(
