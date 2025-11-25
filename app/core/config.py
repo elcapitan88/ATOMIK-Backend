@@ -234,6 +234,22 @@ class Settings(BaseSettings):
     REWARDFUL_API_SECRET: str = ""
     REWARDFUL_API_KEY: str = ""
 
+    # ARIA Integration Settings
+    ANTHROPIC_API_KEY: str = ""
+    ATOMIK_DATA_HUB_URL: str = "http://localhost:8000"  # Default for local dev
+    ARIA_CACHE_TTL: int = 60  # Cache timeout in seconds
+    ARIA_MAX_TOKENS: int = 500  # Default max tokens for responses
+
+    # ARIA Query Configuration
+    ARIA_SIMPLE_MAX_TOKENS: int = 150
+    ARIA_MODERATE_MAX_TOKENS: int = 300
+    ARIA_COMPLEX_MAX_TOKENS: int = 800
+
+    # LLM Provider Settings (groq = economy, anthropic = premium)
+    LLM_PROVIDER: str = "groq"  # Options: "groq", "anthropic", "none"
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.1-70b-versatile"  # Fast and capable
+
     def get_stripe_price_id(self, tier: str, interval: str) -> str:
         """Get the Stripe Price ID for a specific tier and interval with validation"""
         if tier not in ['pro', 'elite']:

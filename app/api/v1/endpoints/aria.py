@@ -240,10 +240,13 @@ async def aria_health_check(
     try:
         # Test database connection
         db.execute("SELECT 1")
-        
+
         # Test ARIA service initialization
         aria = ARIAAssistant(db)
-        
+
+        # Get LLM status
+        llm_report = aria.llm_service.get_usage_report()
+
         return {
             "success": True,
             "status": "healthy",
@@ -252,9 +255,14 @@ async def aria_health_check(
                 "aria_assistant": "initialized",
                 "intent_service": "ready",
                 "context_engine": "ready",
-                "action_executor": "ready"
+                "action_executor": "ready",
+                "llm_service": {
+                    "provider": llm_report.get("provider", "none"),
+                    "model": llm_report.get("model"),
+                    "configured": llm_report.get("is_configured", False)
+                }
             },
-            "timestamp": "2025-01-12T00:00:00Z"
+            "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
     except Exception as e:

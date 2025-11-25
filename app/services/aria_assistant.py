@@ -19,6 +19,7 @@ from ..models.broker import BrokerAccount
 from .intent_service import IntentService, VoiceIntent
 from .aria_context_engine import ARIAContextEngine
 from .aria_action_executor import ARIAActionExecutor
+from .llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class ARIAAssistant:
         self.intent_service = IntentService()
         self.context_engine = ARIAContextEngine(db)
         self.action_executor = ARIAActionExecutor(db)
+        self.llm_service = LLMService()
         
     async def process_user_input(
         self, 
@@ -114,7 +116,7 @@ class ARIAAssistant:
             
             # 8. Generate ARIA response
             response = await self._generate_aria_response(
-                user_context, intent, action_result, input_type
+                user_context, intent, action_result, input_type, original_query=input_text
             )
             
             # 9. Update interaction with response
@@ -199,9 +201,9 @@ class ARIAAssistant:
                 
                 # Update interaction with results
                 await self._update_interaction_action_result(interaction, action_result)
-                
+
                 response = await self._generate_aria_response(
-                    user_context, intent, action_result, "text"
+                    user_context, intent, action_result, "text", original_query=""
                 )
                 
                 await self._update_interaction_response(interaction, response)
@@ -467,32 +469,144 @@ class ARIAAssistant:
         user_context: Dict[str, Any],
         intent: VoiceIntent,
         action_result: Optional[Dict[str, Any]],
-        input_type: str
+        input_type: str,
+        original_query: str = ""
     ) -> Dict[str, Any]:
         """
         Generate intelligent ARIA response based on context and results
+        Uses LLM for enhanced responses when available
         """
-        
+
         # If action was executed, generate result-based response
         if action_result:
             if action_result.get("success"):
                 return self._generate_success_response(intent, action_result, input_type)
             else:
                 return self._generate_error_response(intent, action_result, input_type)
-        
-        # Query responses
+
+        # Query responses - try LLM first for richer responses
         if intent.type == "position_query":
-            return self._generate_position_response(user_context, intent, input_type)
-        
+            return await self._generate_position_response_with_llm(user_context, intent, input_type, original_query)
+
         elif intent.type == "strategy_status":
             return self._generate_strategy_status_response(user_context, intent, input_type)
-        
+
         elif intent.type == "performance_query":
-            return self._generate_performance_response(user_context, intent, input_type)
-        
+            return await self._generate_performance_response_with_llm(user_context, intent, input_type, original_query)
+
+        elif intent.type == "help_request" or intent.type == "greeting":
+            return await self._generate_conversational_response(user_context, intent, input_type, original_query)
+
+        elif intent.type == "unknown":
+            # Use LLM to handle unknown intents conversationally
+            return await self._generate_conversational_response(user_context, intent, input_type, original_query)
+
         # Default response
         return {
             "text": "I understand your request. How else can I help you with your trading?",
+            "type": ARIAResponseType.TEXT.value
+        }
+
+    async def _generate_position_response_with_llm(
+        self,
+        user_context: Dict[str, Any],
+        intent: VoiceIntent,
+        input_type: str,
+        original_query: str
+    ) -> Dict[str, Any]:
+        """Generate position response with optional LLM enhancement"""
+        # Get basic position data
+        basic_response = self._generate_position_response(user_context, intent, input_type)
+
+        # If LLM is available, enhance the response
+        if self.llm_service.client and original_query:
+            try:
+                llm_result = await self.llm_service.analyze_market_data(
+                    query=original_query,
+                    user_context=user_context
+                )
+                if llm_result.get("success"):
+                    return {
+                        "text": llm_result["text"],
+                        "type": ARIAResponseType.TEXT.value,
+                        "position_data": basic_response.get("position_data"),
+                        "llm_enhanced": True,
+                        "provider": llm_result.get("provider")
+                    }
+            except Exception as e:
+                logger.warning(f"LLM enhancement failed, using template: {e}")
+
+        return basic_response
+
+    async def _generate_performance_response_with_llm(
+        self,
+        user_context: Dict[str, Any],
+        intent: VoiceIntent,
+        input_type: str,
+        original_query: str
+    ) -> Dict[str, Any]:
+        """Generate performance response with optional LLM enhancement"""
+        # Get basic performance data
+        basic_response = self._generate_performance_response(user_context, intent, input_type)
+
+        # If LLM is available, enhance the response
+        if self.llm_service.client and original_query:
+            try:
+                llm_result = await self.llm_service.analyze_market_data(
+                    query=original_query,
+                    user_context=user_context
+                )
+                if llm_result.get("success"):
+                    return {
+                        "text": llm_result["text"],
+                        "type": ARIAResponseType.TEXT.value,
+                        "performance_data": basic_response.get("performance_data"),
+                        "llm_enhanced": True,
+                        "provider": llm_result.get("provider")
+                    }
+            except Exception as e:
+                logger.warning(f"LLM enhancement failed, using template: {e}")
+
+        return basic_response
+
+    async def _generate_conversational_response(
+        self,
+        user_context: Dict[str, Any],
+        intent: VoiceIntent,
+        input_type: str,
+        original_query: str
+    ) -> Dict[str, Any]:
+        """Generate conversational response using LLM"""
+        if self.llm_service.client and original_query:
+            try:
+                llm_result = await self.llm_service.analyze_market_data(
+                    query=original_query,
+                    user_context=user_context
+                )
+                if llm_result.get("success"):
+                    return {
+                        "text": llm_result["text"],
+                        "type": ARIAResponseType.TEXT.value,
+                        "llm_enhanced": True,
+                        "provider": llm_result.get("provider")
+                    }
+            except Exception as e:
+                logger.warning(f"LLM conversational response failed: {e}")
+
+        # Fallback responses
+        if intent.type == "greeting":
+            return {
+                "text": "Hello! I'm ARIA, your AI trading assistant. I can help you manage strategies, check positions, and analyze your trading performance. What would you like to do?",
+                "type": ARIAResponseType.TEXT.value
+            }
+        elif intent.type == "help_request":
+            return {
+                "text": "I can help you with: activating/deactivating strategies, checking your positions, viewing performance, and executing trades. Try saying 'show my positions' or 'how did I do today?'",
+                "type": ARIAResponseType.TEXT.value
+            }
+
+        return {
+            "text": "I'm not sure I understood that. Could you rephrase? I can help with positions, strategies, performance, and trades.",
             "type": ARIAResponseType.TEXT.value
         }
     
