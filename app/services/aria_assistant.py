@@ -41,15 +41,22 @@ class ARIARiskLevel(Enum):
 class ARIAAssistant:
     """
     Main ARIA Assistant service - orchestrates all ARIA functionality
-    
+
     This is the central coordinator that:
     1. Processes user input (voice/text)
     2. Understands intent and context
     3. Executes actions safely
     4. Generates intelligent responses
     5. Learns from interactions
+
+    Supports two processing modes:
+    - Tool Calling (recommended): LLM decides which tools to use
+    - Legacy (deprecated): Rule-based intent detection
     """
-    
+
+    # Set to True to use LLM tool-calling architecture (recommended)
+    USE_TOOL_CALLING = True
+
     def __init__(self, db: Session):
         self.db = db
         self.intent_service = IntentService()
@@ -63,7 +70,8 @@ class ARIAAssistant:
         self,
         user_id: int,
         input_text: str,
-        input_type: str = "text"
+        input_type: str = "text",
+        use_premium: bool = False
     ) -> Dict[str, Any]:
         """
         Main entry point for all ARIA interactions
@@ -72,12 +80,21 @@ class ARIAAssistant:
             user_id: User's database ID
             input_text: Raw user input (voice transcript or typed text)
             input_type: "voice" or "text"
+            use_premium: Use premium LLM provider (Anthropic) instead of economy (Groq)
 
         Returns:
             Complete response with action results and ARIA reply
         """
         interaction_start = datetime.utcnow()
         logger.info(f"[ARIA] process_user_input started for user {user_id}: '{input_text[:100]}...'")
+
+        # Route to tool-calling architecture if enabled
+        if self.USE_TOOL_CALLING:
+            logger.info("[ARIA] Using tool-calling architecture")
+            return await self._process_with_tools(user_id, input_text, input_type, use_premium)
+
+        # Legacy flow (deprecated) - kept for backward compatibility
+        logger.info("[ARIA] Using legacy intent-based architecture")
 
         try:
             # 1. Get or create user trading profile
@@ -174,9 +191,163 @@ class ARIAAssistant:
                 "processing_time_ms": int((datetime.utcnow() - interaction_start).total_seconds() * 1000)
             }
     
+    async def _process_with_tools(
+        self,
+        user_id: int,
+        input_text: str,
+        input_type: str = "text",
+        use_premium: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Process user input using LLM tool-calling architecture.
+
+        This is the recommended approach where:
+        1. User query goes directly to LLM with available tools
+        2. LLM decides which tools (if any) to call
+        3. Tool results are fed back to LLM for response generation
+
+        Includes conversation memory for multi-turn context.
+
+        Args:
+            user_id: User's database ID
+            input_text: Raw user input
+            input_type: "voice" or "text"
+            use_premium: Use premium LLM (Anthropic) vs economy (Groq)
+
+        Returns:
+            Complete response with action results and ARIA reply
+        """
+        from .aria_conversation_memory import conversation_memory
+
+        interaction_start = datetime.utcnow()
+
+        try:
+            # 1. Get or create user profile (for interaction tracking)
+            user_profile = await self._get_or_create_user_profile(user_id)
+
+            # 2. Get conversation history for context
+            conversation_history = conversation_memory.get_history(user_id)
+            logger.info(f"[ARIA-Tools] Processing with {len(conversation_history)} previous messages")
+
+            # 3. Use LLM with tools to process the query
+            logger.info(f"[ARIA-Tools] Processing: '{input_text[:50]}...' with tools")
+
+            response = await self.llm_service.chat_with_tools(
+                user_query=input_text,
+                user_id=user_id,
+                db=self.db,
+                use_premium=use_premium,
+                conversation_history=conversation_history
+            )
+
+            # 3. Determine risk level and create interaction record
+            # For tool-calling, we use LOW risk by default unless an action tool was used
+            tools_used = response.get("tools_used", [])
+            action_tools = ["activate_strategy", "deactivate_strategy"]
+            has_action = any(t in action_tools for t in tools_used)
+
+            risk_level = ARIARiskLevel.MEDIUM if has_action else ARIARiskLevel.LOW
+            requires_confirmation = response.get("requires_confirmation", False)
+
+            # Create a VoiceIntent for interaction tracking (simulated from tool response)
+            intent = VoiceIntent(
+                type="tool_calling",
+                parameters={
+                    "tools_used": tools_used,
+                    "raw_query": input_text
+                },
+                confidence=0.9 if response.get("success") else 0.5,
+                requires_action=has_action
+            )
+
+            # 4. Create interaction record
+            interaction = await self._create_interaction_record(
+                user_profile.id,
+                input_text,
+                input_type,
+                intent,
+                risk_level,
+                requires_confirmation
+            )
+
+            # 5. Build response object
+            processing_time = int((datetime.utcnow() - interaction_start).total_seconds() * 1000)
+
+            response_obj = {
+                "text": response.get("text", "I couldn't process that request."),
+                "type": ARIAResponseType.CONFIRMATION.value if requires_confirmation else ARIAResponseType.TEXT.value,
+                "tools_used": tools_used,
+                "provider": response.get("provider", "unknown")
+            }
+
+            # Handle confirmation flow
+            if requires_confirmation:
+                pending_action = response.get("pending_action", {})
+                response_obj["requires_confirmation"] = True
+                response_obj["interaction_id"] = interaction.id
+                response_obj["pending_action"] = pending_action
+
+                await self._update_interaction_response(interaction, response_obj)
+
+                return {
+                    "success": True,
+                    "interaction_id": interaction.id,
+                    "response": response_obj,
+                    "action_result": None,
+                    "requires_confirmation": True,
+                    "pending_action": pending_action,
+                    "risk_level": risk_level.value,
+                    "processing_time_ms": processing_time
+                }
+
+            # 6. Update interaction with response
+            await self._update_interaction_response(interaction, response_obj)
+
+            # 7. Store in conversation memory for multi-turn context
+            conversation_memory.add_user_message(user_id, input_text)
+            conversation_memory.add_assistant_message(
+                user_id,
+                response_obj["text"],
+                tool_calls=tools_used
+            )
+
+            logger.info(f"[ARIA-Tools] Completed in {processing_time}ms, tools: {tools_used}")
+
+            return {
+                "success": response.get("success", True),
+                "interaction_id": interaction.id,
+                "response": response_obj,
+                "action_result": None,
+                "requires_confirmation": False,
+                "risk_level": risk_level.value,
+                "processing_time_ms": processing_time,
+                "error": response.get("error")
+            }
+
+        except Exception as e:
+            logger.error(f"[ARIA-Tools] Error for user {user_id}: {str(e)}", exc_info=True)
+
+            # Create error interaction
+            error_interaction = await self._create_error_interaction(
+                user_id, input_text, input_type, str(e)
+            )
+
+            processing_time = int((datetime.utcnow() - interaction_start).total_seconds() * 1000)
+
+            return {
+                "success": False,
+                "interaction_id": error_interaction.id,
+                "error": str(e),
+                "response": {
+                    "text": "I'm sorry, I encountered an error processing your request. Please try again.",
+                    "type": ARIAResponseType.ERROR.value
+                },
+                "processing_time_ms": processing_time
+            }
+
     async def execute_voice_command(
-        self, 
-        user_id: int, 
+        self,
+        user_id: int,
         command: str
     ) -> Dict[str, Any]:
         """

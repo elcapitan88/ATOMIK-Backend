@@ -1,12 +1,19 @@
 # app/services/llm_service.py
 """
-LLM Service for ARIA - Multi-provider support
-Supports Groq (economy) and Anthropic Claude (premium)
-Implements smart configuration based on query complexity
+LLM Service for ARIA - Multi-provider support with Tool Calling
+
+Providers:
+- Groq (economy): openai/gpt-oss-20b - Fast, cheap, prompt caching enabled
+- Anthropic (premium): Claude Sonnet - Best quality for complex queries
+
+Architecture: LLM-first with tool calling
+- LLM decides which tools to use based on user queries
+- System prompt + tool definitions are cached (50% cost reduction on Groq)
+- 131K context window supports long conversation histories
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 import json
 from enum import Enum
@@ -59,7 +66,15 @@ class LLMService:
         }
 
     def _init_groq(self):
-        """Initialize Groq client (OpenAI-compatible API)"""
+        """
+        Initialize Groq client (OpenAI-compatible API)
+
+        Default model: openai/gpt-oss-20b
+        - 20B parameter MoE model with 131K context
+        - Supports prompt caching (50% discount on cached input tokens)
+        - Supports tool calling for ARIA's function-based architecture
+        - Pricing: $0.075/1M input ($0.0375 cached), $0.30/1M output
+        """
         api_key = getattr(settings, 'GROQ_API_KEY', '')
 
         if not api_key:
@@ -73,7 +88,11 @@ class LLMService:
                 api_key=api_key,
                 base_url="https://api.groq.com/openai/v1"
             )
-            self.model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-70b-versatile')
+            # GPT-OSS-20B: Best balance of speed, cost, and capabilities
+            # - Prompt caching: 50% off on repeated system prompts/tools
+            # - Tool calling: Native support for ARIA's function architecture
+            # - 131K context: Handles long conversation histories
+            self.model = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
             logger.info(f"LLM Service initialized with Groq ({self.model})")
         except ImportError:
             logger.error("OpenAI package not installed. Run: pip install openai")
@@ -580,6 +599,442 @@ Guidelines:
                 4
             ),
             "is_configured": self.client is not None
+        }
+
+    # =========================================================================
+    # Tool Calling Methods (LLM-First Architecture)
+    # =========================================================================
+
+    async def chat_with_tools(
+        self,
+        user_query: str,
+        user_id: int,
+        db: Any,
+        use_premium: bool = False,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Main entry point for tool-calling architecture.
+        Sends query to LLM with available tools, LLM decides which to call.
+
+        Args:
+            user_query: User's natural language query
+            user_id: User's ID for context
+            db: Database session
+            use_premium: Use Anthropic (premium) instead of Groq (economy)
+            conversation_history: Previous messages for context (enables multi-turn conversations)
+
+        Returns:
+            Response dictionary with text and metadata
+        """
+        from .aria_tools import (
+            ARIA_TOOLS,
+            get_tools_for_anthropic,
+            get_tools_for_groq,
+            ARIAToolExecutor,
+            ARIA_TOOL_CALLING_SYSTEM_PROMPT
+        )
+
+        # Default to empty history if not provided
+        if conversation_history is None:
+            conversation_history = []
+
+        # Determine which provider to use
+        provider = "anthropic" if use_premium else self.provider
+
+        # Check if we have a valid client
+        if not self.client or self.provider == "none":
+            return {
+                "success": False,
+                "text": "AI service not configured. Please check your LLM settings.",
+                "tools_used": [],
+                "provider": "none"
+            }
+
+        logger.info(f"Processing query with tools: '{user_query[:50]}...' using {provider}")
+
+        try:
+            # Initial LLM call with tools
+            if provider == "anthropic":
+                response = await self._call_anthropic_with_tools(
+                    user_query,
+                    get_tools_for_anthropic(),
+                    ARIA_TOOL_CALLING_SYSTEM_PROMPT,
+                    conversation_history
+                )
+            else:
+                response = await self._call_groq_with_tools(
+                    user_query,
+                    get_tools_for_groq(),
+                    ARIA_TOOL_CALLING_SYSTEM_PROMPT,
+                    conversation_history
+                )
+
+            # Check if LLM wants to call tools
+            tool_calls = response.get("tool_calls", [])
+
+            if tool_calls:
+                logger.info(f"LLM requested {len(tool_calls)} tool call(s)")
+
+                # Execute the tools
+                executor = ARIAToolExecutor(db, user_id)
+                tool_results = await executor.execute_multiple(tool_calls)
+
+                # Check for confirmation requirements
+                for result in tool_results:
+                    if result.get("result", {}).get("requires_confirmation"):
+                        return {
+                            "success": True,
+                            "text": result["result"]["message"],
+                            "requires_confirmation": True,
+                            "pending_action": result["result"],
+                            "tools_used": [tc.get("name", tc.get("function", {}).get("name")) for tc in tool_calls],
+                            "provider": provider
+                        }
+
+                # Send tool results back to LLM for final response
+                final_response = await self._get_final_response_with_tool_results(
+                    user_query,
+                    tool_calls,
+                    tool_results,
+                    provider,
+                    ARIA_TOOL_CALLING_SYSTEM_PROMPT
+                )
+
+                return {
+                    "success": True,
+                    "text": final_response.get("text", ""),
+                    "tools_used": [tc.get("name", tc.get("function", {}).get("name")) for tc in tool_calls],
+                    "tool_results": tool_results,
+                    "provider": provider
+                }
+
+            # No tools called - return direct response
+            return {
+                "success": True,
+                "text": response.get("text", ""),
+                "tools_used": [],
+                "provider": provider
+            }
+
+        except Exception as e:
+            logger.error(f"Tool calling error: {e}", exc_info=True)
+            return {
+                "success": False,
+                "text": f"I encountered an error processing your request. Please try again.",
+                "error": str(e),
+                "tools_used": [],
+                "provider": provider
+            }
+
+    async def _call_groq_with_tools(
+        self,
+        query: str,
+        tools: List[Dict[str, Any]],
+        system_prompt: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Call Groq API with tool definitions.
+
+        Args:
+            query: User query
+            tools: List of tool definitions
+            system_prompt: System prompt for the model
+            conversation_history: Previous messages for context
+
+        Returns:
+            Response with potential tool calls
+        """
+        try:
+            # Build messages with conversation history
+            messages = [{"role": "system", "content": system_prompt}]
+
+            # Add conversation history (previous turns)
+            if conversation_history:
+                messages.extend(conversation_history)
+
+            # Add current user query
+            messages.append({"role": "user", "content": query})
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=1024,
+                temperature=0.5,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto"
+            )
+
+            message = response.choices[0].message
+
+            # Extract tool calls if any
+            tool_calls = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    tool_calls.append({
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    })
+
+            return {
+                "text": message.content or "",
+                "tool_calls": tool_calls,
+                "raw_response": response
+            }
+
+        except Exception as e:
+            logger.error(f"Groq tool calling error: {e}")
+            raise
+
+    async def _call_anthropic_with_tools(
+        self,
+        query: str,
+        tools: List[Dict[str, Any]],
+        system_prompt: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Call Anthropic API with tool definitions.
+
+        Args:
+            query: User query
+            tools: List of tool definitions in Anthropic format
+            system_prompt: System prompt for the model
+            conversation_history: Previous messages for context
+
+        Returns:
+            Response with potential tool calls
+        """
+        try:
+            # Build messages with conversation history
+            messages = []
+
+            # Add conversation history (previous turns)
+            if conversation_history:
+                messages.extend(conversation_history)
+
+            # Add current user query
+            messages.append({"role": "user", "content": query})
+
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=1024,
+                system=system_prompt,
+                tools=tools,
+                messages=messages
+            )
+
+            # Extract text and tool calls from Anthropic response
+            text_content = ""
+            tool_calls = []
+
+            for block in response.content:
+                if block.type == "text":
+                    text_content = block.text
+                elif block.type == "tool_use":
+                    tool_calls.append({
+                        "id": block.id,
+                        "name": block.name,
+                        "arguments": block.input
+                    })
+
+            return {
+                "text": text_content,
+                "tool_calls": tool_calls,
+                "stop_reason": response.stop_reason,
+                "raw_response": response
+            }
+
+        except Exception as e:
+            logger.error(f"Anthropic tool calling error: {e}")
+            raise
+
+    async def _get_final_response_with_tool_results(
+        self,
+        original_query: str,
+        tool_calls: List[Dict[str, Any]],
+        tool_results: List[Dict[str, Any]],
+        provider: str,
+        system_prompt: str
+    ) -> Dict[str, Any]:
+        """
+        Send tool results back to LLM to generate final response.
+
+        Args:
+            original_query: The user's original question
+            tool_calls: Tool calls made by the LLM
+            tool_results: Results from executing the tools
+            provider: Which LLM provider to use
+            system_prompt: System prompt
+
+        Returns:
+            Final response from LLM
+        """
+        try:
+            if provider == "anthropic":
+                return await self._get_anthropic_final_response(
+                    original_query, tool_calls, tool_results, system_prompt
+                )
+            else:
+                return await self._get_groq_final_response(
+                    original_query, tool_calls, tool_results, system_prompt
+                )
+        except Exception as e:
+            logger.error(f"Error getting final response: {e}")
+            # Return a basic response based on tool results
+            return self._format_fallback_tool_response(tool_results)
+
+    async def _get_groq_final_response(
+        self,
+        original_query: str,
+        tool_calls: List[Dict[str, Any]],
+        tool_results: List[Dict[str, Any]],
+        system_prompt: str
+    ) -> Dict[str, Any]:
+        """Get final response from Groq after tool execution"""
+        # Build messages with tool results
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": original_query},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": tc["arguments"] if isinstance(tc["arguments"], str) else json.dumps(tc["arguments"])
+                        }
+                    }
+                    for tc in tool_calls
+                ]
+            }
+        ]
+
+        # Add tool results
+        for result in tool_results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": result["tool_call_id"],
+                "content": json.dumps(result["result"])
+            })
+
+        response = self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=1024,
+            temperature=0.5,
+            messages=messages
+        )
+
+        return {
+            "text": response.choices[0].message.content or "",
+            "provider": "groq"
+        }
+
+    async def _get_anthropic_final_response(
+        self,
+        original_query: str,
+        tool_calls: List[Dict[str, Any]],
+        tool_results: List[Dict[str, Any]],
+        system_prompt: str
+    ) -> Dict[str, Any]:
+        """Get final response from Anthropic after tool execution"""
+        # Build messages with tool use and results
+        messages = [
+            {"role": "user", "content": original_query},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["name"],
+                        "input": tc["arguments"] if isinstance(tc["arguments"], dict) else json.loads(tc["arguments"])
+                    }
+                    for tc in tool_calls
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": result["tool_call_id"],
+                        "content": json.dumps(result["result"])
+                    }
+                    for result in tool_results
+                ]
+            }
+        ]
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=1024,
+            system=system_prompt,
+            messages=messages
+        )
+
+        # Extract text from response
+        text_content = ""
+        for block in response.content:
+            if block.type == "text":
+                text_content = block.text
+
+        return {
+            "text": text_content,
+            "provider": "anthropic"
+        }
+
+    def _format_fallback_tool_response(
+        self,
+        tool_results: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Format a basic response from tool results when LLM fails.
+
+        Args:
+            tool_results: Results from tool execution
+
+        Returns:
+            Formatted response
+        """
+        parts = []
+
+        for result in tool_results:
+            name = result.get("name", "unknown")
+            data = result.get("result", {})
+
+            if "error" in data:
+                parts.append(f"Error fetching {name}: {data['error']}")
+            elif name == "get_stock_quote":
+                symbol = data.get("symbol", "")
+                price = data.get("price", 0)
+                change_pct = data.get("change_percent", 0)
+                direction = "up" if change_pct >= 0 else "down"
+                parts.append(f"{symbol} is at ${price:.2f}, {direction} {abs(change_pct):.2f}% today.")
+            elif name == "get_historical_data":
+                symbol = data.get("symbol", "")
+                if "open" in data and "close" in data:
+                    parts.append(
+                        f"{symbol} on {data.get('actual_date', 'requested date')}: "
+                        f"Open ${data.get('open', 0):.2f}, Close ${data.get('close', 0):.2f}"
+                    )
+            elif name == "get_user_positions":
+                total = data.get("total_positions", 0)
+                parts.append(f"You have {total} open position(s).")
+            elif name == "get_active_strategies":
+                count = data.get("active_count", 0)
+                parts.append(f"You have {count} active strategy(ies).")
+            else:
+                parts.append(f"Data retrieved for {name}.")
+
+        return {
+            "text": " ".join(parts) if parts else "I retrieved the data but couldn't format a response.",
+            "provider": "fallback"
         }
 
 
