@@ -938,21 +938,44 @@ class ARIAToolExecutor:
         if not result.get("success"):
             return {"error": result.get("error", "Failed to fetch interest rates")}
 
-        data = result.get("data", {})
-        rates = data.get("rates", {})
+        # Data Hub returns a list of rate objects in "data"
+        data = result.get("data", [])
 
-        return {
-            "fed_funds_rate": rates.get("FEDFUNDS", {}).get("value"),
-            "treasury_2y": rates.get("DGS2", {}).get("value"),
-            "treasury_5y": rates.get("DGS5", {}).get("value"),
-            "treasury_10y": rates.get("DGS10", {}).get("value"),
-            "treasury_30y": rates.get("DGS30", {}).get("value"),
-            "mortgage_30y": rates.get("MORTGAGE30US", {}).get("value"),
-            "prime_rate": rates.get("DPRIME", {}).get("value"),
-            "yield_curve": data.get("yield_curve", {}),
-            "timestamp": result.get("timestamp"),
-            "source": result.get("source", "fred")
-        }
+        # Handle both list format (from Data Hub) and dict format (potential future)
+        if isinstance(data, list):
+            # Convert list to a more usable format
+            rates_by_id = {}
+            for rate in data:
+                series_id = rate.get("series_id", "")
+                rates_by_id[series_id] = {
+                    "rate_type": rate.get("rate_type"),
+                    "value": rate.get("current_rate"),
+                    "date": rate.get("change_date")
+                }
+
+            return {
+                "fed_funds_rate": rates_by_id.get("FEDFUNDS", {}).get("value"),
+                "treasury_3m": rates_by_id.get("DGS3MO", {}).get("value"),
+                "treasury_2y": rates_by_id.get("DGS2", {}).get("value"),
+                "treasury_10y": rates_by_id.get("DGS10", {}).get("value"),
+                "treasury_30y": rates_by_id.get("DGS30", {}).get("value"),
+                "corporate_aaa": rates_by_id.get("AAA", {}).get("value"),
+                "corporate_baa": rates_by_id.get("BAA", {}).get("value"),
+                "all_rates": data,  # Include full list for completeness
+                "timestamp": result.get("timestamp"),
+                "source": result.get("source", "fred")
+            }
+        else:
+            # Fallback for dict format
+            rates = data.get("rates", {}) if isinstance(data, dict) else {}
+            return {
+                "fed_funds_rate": rates.get("FEDFUNDS", {}).get("value"),
+                "treasury_2y": rates.get("DGS2", {}).get("value"),
+                "treasury_10y": rates.get("DGS10", {}).get("value"),
+                "treasury_30y": rates.get("DGS30", {}).get("value"),
+                "timestamp": result.get("timestamp"),
+                "source": result.get("source", "fred")
+            }
 
     async def _get_economic_snapshot(self) -> Dict[str, Any]:
         """Get economic conditions snapshot."""
@@ -961,19 +984,41 @@ class ARIAToolExecutor:
         if not result.get("success"):
             return {"error": result.get("error", "Failed to fetch economic snapshot")}
 
+        # Data Hub returns flat keys in "data" dict
         data = result.get("data", {})
-        indicators = data.get("indicators", {})
 
-        return {
-            "gdp": indicators.get("gdp", {}),
-            "unemployment": indicators.get("unemployment", {}),
-            "inflation": indicators.get("inflation", {}),
-            "consumer_sentiment": indicators.get("consumer_sentiment", {}),
-            "housing": indicators.get("housing", {}),
-            "summary": data.get("summary", ""),
-            "timestamp": result.get("timestamp"),
-            "source": result.get("source", "fred")
-        }
+        # Handle both flat format (from Data Hub) and nested format (potential future)
+        if isinstance(data, dict):
+            # Check if it's the flat format from Data Hub
+            if "gdp_growth" in data or "unemployment_rate" in data:
+                return {
+                    "gdp_growth": data.get("gdp_growth"),
+                    "inflation_rate": data.get("inflation_rate"),
+                    "unemployment_rate": data.get("unemployment_rate"),
+                    "fed_funds_rate": data.get("fed_funds_rate"),
+                    "ten_year_yield": data.get("ten_year_yield"),
+                    "timestamp": data.get("timestamp") or result.get("timestamp"),
+                    "source": result.get("source", "fred")
+                }
+            else:
+                # Nested format fallback
+                indicators = data.get("indicators", {})
+                return {
+                    "gdp": indicators.get("gdp", {}),
+                    "unemployment": indicators.get("unemployment", {}),
+                    "inflation": indicators.get("inflation", {}),
+                    "consumer_sentiment": indicators.get("consumer_sentiment", {}),
+                    "housing": indicators.get("housing", {}),
+                    "summary": data.get("summary", ""),
+                    "timestamp": result.get("timestamp"),
+                    "source": result.get("source", "fred")
+                }
+        else:
+            return {
+                "error": "Unexpected data format",
+                "timestamp": result.get("timestamp"),
+                "source": result.get("source", "fred")
+            }
 
     async def _get_economic_calendar(self) -> Dict[str, Any]:
         """Get upcoming economic releases."""
