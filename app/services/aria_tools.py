@@ -164,6 +164,109 @@ ARIA_TOOLS = [
         }
     },
     # -------------------------------------------------------------------------
+    # SEC/EDGAR Tools
+    # -------------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sec_filings",
+            "description": "Get SEC filings (10-K, 10-Q, 8-K, S-3, etc.) for a company. Use when user asks about SEC filings, annual reports, quarterly reports, registration statements, or regulatory filings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker symbol (e.g., AAPL, TSLA)"
+                    },
+                    "form_type": {
+                        "type": "string",
+                        "description": "SEC form type to filter (e.g., 10-K, 10-Q, 8-K, S-3, 424B5). Optional."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of filings to return (default 10)",
+                        "default": 10
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_insider_trading",
+            "description": "Get insider trading activity for a company (Form 4 filings). Use when user asks about insider buying, insider selling, executive stock transactions, or insider activity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker symbol"
+                    },
+                    "days_back": {
+                        "type": "integer",
+                        "description": "Number of days to look back (default 30)",
+                        "default": 30
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of transactions (default 20)",
+                        "default": 20
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_institutional_holdings",
+            "description": "Get institutional ownership data for a company (13F filings). Use when user asks about institutional holders, which funds own a stock, or institutional ownership.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker symbol"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of holders to return (default 20)",
+                        "default": 20
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_filing_document",
+            "description": "Fetch and analyze the content of a specific SEC filing. Use when user asks about details in a filing like S-3, 424B5, 10-K content, registered shares, offering terms, or specific information from filings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker symbol"
+                    },
+                    "form_type": {
+                        "type": "string",
+                        "description": "Form type to retrieve (e.g., S-3, 424B5, 10-K, 8-K)"
+                    },
+                    "accession_number": {
+                        "type": "string",
+                        "description": "Specific filing accession number (optional, if not provided gets most recent)"
+                    }
+                },
+                "required": ["symbol", "form_type"]
+            }
+        }
+    },
+    # -------------------------------------------------------------------------
     # Action Tools (Require Confirmation)
     # -------------------------------------------------------------------------
     {
@@ -251,6 +354,15 @@ class ARIAToolExecutor:
         # Lazy-load services to avoid circular imports
         self._market_service = None
         self._context_engine = None
+        self._data_hub_service = None
+
+    @property
+    def data_hub_service(self):
+        """Lazy load data hub service"""
+        if self._data_hub_service is None:
+            from .data_hub_service import data_hub_service
+            self._data_hub_service = data_hub_service
+        return self._data_hub_service
 
     @property
     def market_service(self):
@@ -290,6 +402,11 @@ class ARIAToolExecutor:
             "get_broker_status": self._get_broker_status,
             "activate_strategy": self._activate_strategy,
             "deactivate_strategy": self._deactivate_strategy,
+            # SEC/EDGAR Tools
+            "get_sec_filings": self._get_sec_filings,
+            "get_insider_trading": self._get_insider_trading,
+            "get_institutional_holdings": self._get_institutional_holdings,
+            "get_filing_document": self._get_filing_document,
         }
 
         handler = handlers.get(tool_name)
@@ -505,6 +622,163 @@ class ARIAToolExecutor:
             return {"error": str(e)}
 
     # -------------------------------------------------------------------------
+    # Tool Handlers: SEC/EDGAR Data
+    # -------------------------------------------------------------------------
+
+    async def _get_sec_filings(
+        self,
+        symbol: str,
+        form_type: Optional[str] = None,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """Get SEC filings for a company."""
+        result = await self.data_hub_service.get_sec_filings(
+            ticker=symbol,
+            form_type=form_type,
+            limit=limit
+        )
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch SEC filings")}
+
+        data = result.get("data", {})
+        filings = data.get("filings", [])
+
+        return {
+            "company": data.get("company_info", {}).get("company_name"),
+            "ticker": symbol.upper(),
+            "total_filings": len(filings),
+            "filings": [
+                {
+                    "form": f.get("form_type"),
+                    "filed": f.get("filing_date"),
+                    "description": f.get("description")
+                }
+                for f in filings[:limit]
+            ],
+            "source": result.get("source", "edgar")
+        }
+
+    async def _get_insider_trading(
+        self,
+        symbol: str,
+        days_back: int = 30,
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """Get insider trading activity."""
+        result = await self.data_hub_service.get_insider_trading(
+            ticker=symbol,
+            days_back=days_back,
+            limit=limit
+        )
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch insider trading")}
+
+        data = result.get("data", {})
+        transactions = data.get("transactions", [])
+        summary = data.get("summary", {})
+
+        return {
+            "company": data.get("company_info", {}).get("company_name"),
+            "ticker": symbol.upper(),
+            "period": f"Last {days_back} days",
+            "summary": {
+                "total_transactions": summary.get("total_transactions", 0),
+                "net_activity": "Buying" if summary.get("net_activity", 0) > 0 else "Selling",
+                "acquisitions": summary.get("acquisitions", 0),
+                "dispositions": summary.get("dispositions", 0)
+            },
+            "recent_transactions": [
+                {
+                    "insider": t.get("insider_name"),
+                    "title": t.get("insider_title"),
+                    "type": "Buy" if t.get("transaction_type") == "A" else "Sell",
+                    "shares": t.get("shares"),
+                    "price": t.get("price_per_share"),
+                    "value": t.get("transaction_value"),
+                    "date": t.get("transaction_date")
+                }
+                for t in transactions[:10]
+            ],
+            "source": result.get("source", "edgar")
+        }
+
+    async def _get_institutional_holdings(
+        self,
+        symbol: str,
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """Get institutional holdings."""
+        result = await self.data_hub_service.get_institutional_holdings(
+            ticker=symbol,
+            limit=limit
+        )
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch institutional holdings")}
+
+        data = result.get("data", {})
+        holdings = data.get("holdings", [])
+        summary = data.get("summary", {})
+
+        return {
+            "company": data.get("company_info", {}).get("company_name"),
+            "ticker": symbol.upper(),
+            "summary": {
+                "total_institutions": summary.get("total_institutions", 0),
+                "total_value": summary.get("total_value", 0),
+                "top_holder": summary.get("top_holder", {}).get("name") if summary.get("top_holder") else None
+            },
+            "top_holders": [
+                {
+                    "institution": h.get("institution_name"),
+                    "shares": h.get("shares"),
+                    "value": h.get("market_value"),
+                    "percent": h.get("percent_of_class")
+                }
+                for h in holdings[:10]
+            ],
+            "source": result.get("source", "edgar")
+        }
+
+    async def _get_filing_document(
+        self,
+        symbol: str,
+        form_type: str,
+        accession_number: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get the content of a specific SEC filing.
+
+        Returns the document content for AI analysis.
+        """
+        result = await self.data_hub_service.get_filing_document(
+            ticker=symbol,
+            form_type=form_type,
+            accession_number=accession_number
+        )
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch filing document")}
+
+        data = result.get("data", {})
+        filing_info = data.get("filing_info", {})
+
+        return {
+            "company": data.get("company_info", {}).get("company_name"),
+            "ticker": symbol.upper(),
+            "form_type": filing_info.get("form_type"),
+            "form_description": filing_info.get("form_description"),
+            "filing_date": filing_info.get("filing_date"),
+            "accession_number": filing_info.get("accession_number"),
+            "document_url": filing_info.get("document_url"),
+            "content": data.get("content"),
+            "content_length": data.get("content_length"),
+            "source": result.get("source", "edgar")
+        }
+
+    # -------------------------------------------------------------------------
     # Tool Handlers: Actions (Require Confirmation)
     # -------------------------------------------------------------------------
 
@@ -547,11 +821,13 @@ ARIA_TOOL_CALLING_SYSTEM_PROMPT = """You are ARIA, an expert AI trading assistan
 You have access to tools that let you:
 - Get real-time stock/ETF quotes and prices
 - Fetch historical price data for any period
-- Check company information
+- Check company information and fundamentals
 - View user's positions and portfolio
 - See active trading strategies
 - Check trading performance metrics
 - View broker account status
+- Access SEC EDGAR filings and insider trading data
+- Analyze SEC documents (S-3, 424B5, 10-K, etc.)
 
 ## Guidelines
 
@@ -586,6 +862,30 @@ You have access to tools that let you:
 6. **Performance questions** → Use get_trading_performance
    - "How am I doing today?"
    - "What's my P&L this week?"
+
+7. **SEC filings** → Use get_sec_filings
+   - "Show me Tesla's recent SEC filings"
+   - "What 10-K reports has Apple filed?"
+   - "Get NVDA's 8-K filings"
+   - "Has the company filed an S-3?"
+
+8. **Insider trading** → Use get_insider_trading
+   - "Has anyone at Apple been buying stock?"
+   - "Show me insider trading at Tesla"
+   - "Are executives selling NVDA?"
+   - "What's the insider activity for AAPL?"
+
+9. **Institutional holdings** → Use get_institutional_holdings
+   - "Who owns the most Apple stock?"
+   - "What institutions hold Tesla?"
+   - "Top institutional holders of NVDA"
+   - "Which funds own AAPL?"
+
+10. **Filing documents** → Use get_filing_document
+    - "What's in TSLA's latest S-3 registration?"
+    - "How many shares were registered in the 424B5?"
+    - "Show me the details of the latest offering"
+    - "What does the 8-K say about the acquisition?"
 
 ### When NOT to Use Tools
 - General knowledge questions about trading, markets, or finance
