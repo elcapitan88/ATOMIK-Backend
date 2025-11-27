@@ -6,6 +6,7 @@ This service makes HTTP calls to the Data Hub to fetch:
 - Insider trading data
 - Institutional holdings
 - Filing document content for AI analysis
+- FRED economic data (Federal Reserve Economic Data)
 """
 
 import logging
@@ -205,6 +206,157 @@ class DataHubService:
 
         except Exception as e:
             logger.error(f"Error fetching filing document: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    # ==================== FRED Economic Data Methods ====================
+
+    async def get_fred_series(
+        self,
+        series_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 100
+    ) -> Dict[str, Any]:
+        """
+        Get FRED economic data series.
+
+        Args:
+            series_id: FRED series ID (e.g., GDP, UNRATE, CPIAUCSL, FEDFUNDS)
+            start_date: Start date (YYYY-MM-DD format)
+            end_date: End date (YYYY-MM-DD format)
+            limit: Maximum number of observations
+
+        Returns:
+            Series data with observations and metadata
+        """
+        try:
+            client = await self._get_client()
+
+            params = {"series_id": series_id, "limit": limit}
+            if start_date:
+                params["start_date"] = start_date
+            if end_date:
+                params["end_date"] = end_date
+
+            response = await client.get("/api/fred/series", params=params)
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Error fetching FRED series {series_id}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    async def get_interest_rates(self) -> Dict[str, Any]:
+        """
+        Get current interest rates from FRED.
+
+        Returns curated interest rate data including:
+        - Federal Funds Rate
+        - Treasury yields (2Y, 5Y, 10Y, 30Y)
+        - Mortgage rates
+        - Prime rate
+        """
+        try:
+            client = await self._get_client()
+
+            response = await client.get("/api/fred/interest-rates")
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Error fetching interest rates: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    async def get_economic_snapshot(self) -> Dict[str, Any]:
+        """
+        Get economic conditions snapshot from FRED.
+
+        Returns key economic indicators:
+        - GDP and growth rate
+        - Unemployment rate
+        - Inflation (CPI, PCE)
+        - Consumer sentiment
+        - Housing starts
+        """
+        try:
+            client = await self._get_client()
+
+            response = await client.get("/api/fred/snapshot")
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Error fetching economic snapshot: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    async def get_economic_calendar(self) -> Dict[str, Any]:
+        """
+        Get upcoming economic data releases.
+
+        Returns calendar of scheduled releases for major indicators.
+        """
+        try:
+            client = await self._get_client()
+
+            response = await client.get("/api/fred/calendar")
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Error fetching economic calendar: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    async def search_fred_series(
+        self,
+        query: str,
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Search for FRED series by keyword.
+
+        Args:
+            query: Search term (e.g., 'unemployment', 'inflation', 'housing')
+            limit: Maximum number of results
+
+        Returns:
+            List of matching series with metadata
+        """
+        try:
+            client = await self._get_client()
+
+            params = {"query": query, "limit": limit}
+
+            response = await client.get("/api/fred/search", params=params)
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            logger.error(f"Error searching FRED series for '{query}': {e}")
             return {
                 "success": False,
                 "error": str(e),

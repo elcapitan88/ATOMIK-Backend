@@ -267,6 +267,97 @@ ARIA_TOOLS = [
         }
     },
     # -------------------------------------------------------------------------
+    # FRED Economic Data Tools
+    # -------------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "get_fred_series",
+            "description": "Get economic data series from FRED (Federal Reserve Economic Data). Use for GDP, unemployment, inflation, interest rates, housing data, and 800K+ other economic indicators. Use when user asks about economic data, macroeconomic indicators, or wants historical economic trends.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "series_id": {
+                        "type": "string",
+                        "description": "FRED series ID. Common ones: GDP, GDPC1 (real GDP), UNRATE (unemployment), CPIAUCSL (CPI inflation), PCEPI (PCE inflation), FEDFUNDS (Fed funds rate), DGS10 (10Y Treasury), MORTGAGE30US (30Y mortgage rate), HOUST (housing starts), UMCSENT (consumer sentiment)"
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format (optional, defaults to 1 year ago)"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format (optional, defaults to today)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum observations to return (default 100)",
+                        "default": 100
+                    }
+                },
+                "required": ["series_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_interest_rates",
+            "description": "Get current interest rates including Fed funds rate, Treasury yields (2Y, 5Y, 10Y, 30Y), mortgage rates, and prime rate. Use when user asks about interest rates, yields, borrowing costs, or the rate environment.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_economic_snapshot",
+            "description": "Get a comprehensive snapshot of current economic conditions including GDP, unemployment, inflation, consumer sentiment, and housing data. Use when user asks about the economy, economic outlook, or macro conditions.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_economic_calendar",
+            "description": "Get upcoming economic data releases and their scheduled dates. Use when user asks about upcoming economic events, data releases, or when key indicators will be published.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_fred_series",
+            "description": "Search for FRED economic data series by keyword. Use when user wants to find economic indicators but doesn't know the exact series ID, or wants to explore what data is available on a topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search term (e.g., 'unemployment', 'inflation', 'housing', 'consumer', 'gdp', 'interest')"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results (default 10)",
+                        "default": 10
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    # -------------------------------------------------------------------------
     # Action Tools (Require Confirmation)
     # -------------------------------------------------------------------------
     {
@@ -407,6 +498,12 @@ class ARIAToolExecutor:
             "get_insider_trading": self._get_insider_trading,
             "get_institutional_holdings": self._get_institutional_holdings,
             "get_filing_document": self._get_filing_document,
+            # FRED Economic Data Tools
+            "get_fred_series": self._get_fred_series,
+            "get_interest_rates": self._get_interest_rates,
+            "get_economic_snapshot": self._get_economic_snapshot,
+            "get_economic_calendar": self._get_economic_calendar,
+            "search_fred_series": self._search_fred_series,
         }
 
         handler = handlers.get(tool_name)
@@ -779,6 +876,146 @@ class ARIAToolExecutor:
         }
 
     # -------------------------------------------------------------------------
+    # Tool Handlers: FRED Economic Data
+    # -------------------------------------------------------------------------
+
+    async def _get_fred_series(
+        self,
+        series_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 100
+    ) -> Dict[str, Any]:
+        """Get FRED economic data series."""
+        result = await self.data_hub_service.get_fred_series(
+            series_id=series_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch FRED series")}
+
+        data = result.get("data", {})
+        series_info = data.get("series_info", {})
+        observations = data.get("observations", [])
+
+        # Format observations for display
+        formatted_obs = []
+        for obs in observations[-20:]:  # Last 20 for conciseness
+            formatted_obs.append({
+                "date": obs.get("date"),
+                "value": obs.get("value")
+            })
+
+        return {
+            "series_id": series_id.upper(),
+            "title": series_info.get("title", series_id),
+            "units": series_info.get("units"),
+            "frequency": series_info.get("frequency"),
+            "latest_value": observations[-1].get("value") if observations else None,
+            "latest_date": observations[-1].get("date") if observations else None,
+            "observation_count": len(observations),
+            "recent_observations": formatted_obs,
+            "source": result.get("source", "fred")
+        }
+
+    async def _get_interest_rates(self) -> Dict[str, Any]:
+        """Get current interest rates."""
+        result = await self.data_hub_service.get_interest_rates()
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch interest rates")}
+
+        data = result.get("data", {})
+        rates = data.get("rates", {})
+
+        return {
+            "fed_funds_rate": rates.get("FEDFUNDS", {}).get("value"),
+            "treasury_2y": rates.get("DGS2", {}).get("value"),
+            "treasury_5y": rates.get("DGS5", {}).get("value"),
+            "treasury_10y": rates.get("DGS10", {}).get("value"),
+            "treasury_30y": rates.get("DGS30", {}).get("value"),
+            "mortgage_30y": rates.get("MORTGAGE30US", {}).get("value"),
+            "prime_rate": rates.get("DPRIME", {}).get("value"),
+            "yield_curve": data.get("yield_curve", {}),
+            "timestamp": result.get("timestamp"),
+            "source": result.get("source", "fred")
+        }
+
+    async def _get_economic_snapshot(self) -> Dict[str, Any]:
+        """Get economic conditions snapshot."""
+        result = await self.data_hub_service.get_economic_snapshot()
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch economic snapshot")}
+
+        data = result.get("data", {})
+        indicators = data.get("indicators", {})
+
+        return {
+            "gdp": indicators.get("gdp", {}),
+            "unemployment": indicators.get("unemployment", {}),
+            "inflation": indicators.get("inflation", {}),
+            "consumer_sentiment": indicators.get("consumer_sentiment", {}),
+            "housing": indicators.get("housing", {}),
+            "summary": data.get("summary", ""),
+            "timestamp": result.get("timestamp"),
+            "source": result.get("source", "fred")
+        }
+
+    async def _get_economic_calendar(self) -> Dict[str, Any]:
+        """Get upcoming economic releases."""
+        result = await self.data_hub_service.get_economic_calendar()
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch economic calendar")}
+
+        data = result.get("data", {})
+
+        return {
+            "upcoming_releases": data.get("releases", []),
+            "this_week": data.get("this_week", []),
+            "next_week": data.get("next_week", []),
+            "timestamp": result.get("timestamp"),
+            "source": result.get("source", "fred")
+        }
+
+    async def _search_fred_series(
+        self,
+        query: str,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """Search for FRED series."""
+        result = await self.data_hub_service.search_fred_series(
+            query=query,
+            limit=limit
+        )
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to search FRED series")}
+
+        data = result.get("data", {})
+        results = data.get("results", [])
+
+        return {
+            "query": query,
+            "result_count": len(results),
+            "series": [
+                {
+                    "id": s.get("series_id"),
+                    "title": s.get("title"),
+                    "units": s.get("units"),
+                    "frequency": s.get("frequency")
+                }
+                for s in results
+            ],
+            "total_available": data.get("total_available", len(results)),
+            "source": result.get("source", "fred")
+        }
+
+    # -------------------------------------------------------------------------
     # Tool Handlers: Actions (Require Confirmation)
     # -------------------------------------------------------------------------
 
@@ -828,6 +1065,8 @@ You have access to tools that let you:
 - View broker account status
 - Access SEC EDGAR filings and insider trading data
 - Analyze SEC documents (S-3, 424B5, 10-K, etc.)
+- Access FRED (Federal Reserve Economic Data) for macroeconomic indicators
+- Get interest rates, GDP, unemployment, inflation, and 800K+ economic series
 
 ## Guidelines
 
@@ -886,6 +1125,36 @@ You have access to tools that let you:
     - "How many shares were registered in the 424B5?"
     - "Show me the details of the latest offering"
     - "What does the 8-K say about the acquisition?"
+
+11. **Economic data** → Use get_fred_series
+    - "What's the current unemployment rate?"
+    - "Show me GDP growth over the past year"
+    - "How has inflation changed?"
+    - "What's the CPI trend?"
+
+12. **Interest rates** → Use get_interest_rates
+    - "What are current interest rates?"
+    - "What's the 10-year Treasury yield?"
+    - "How high is the Fed funds rate?"
+    - "What's the mortgage rate right now?"
+
+13. **Economic overview** → Use get_economic_snapshot
+    - "How is the economy doing?"
+    - "Give me a macro overview"
+    - "What's the economic outlook?"
+    - "Summarize current economic conditions"
+
+14. **Economic calendar** → Use get_economic_calendar
+    - "When is the next jobs report?"
+    - "What economic data comes out this week?"
+    - "When is the next Fed meeting?"
+    - "Upcoming economic releases"
+
+15. **Find economic indicators** → Use search_fred_series
+    - "What housing data is available?"
+    - "Search for employment indicators"
+    - "Find consumer spending metrics"
+    - "What inflation measures exist?"
 
 ### When NOT to Use Tools
 - General knowledge questions about trading, markets, or finance
