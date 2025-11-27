@@ -410,6 +410,141 @@ class MarketDataService:
         self._cache.clear()
         logger.info("Market data cache cleared")
 
+    async def get_fundamental_data(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get fundamental/financial data for a stock.
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            Dict with P/E, EPS, market cap, dividends, 52-week range, analyst data, etc.
+        """
+        try:
+            cache_key = f"fundamentals_{symbol}"
+            cached = self._get_cached(cache_key)
+            if cached:
+                return cached
+
+            yf = _get_yfinance()
+
+            def fetch_fundamentals():
+                ticker = yf.Ticker(symbol.upper())
+                info = ticker.info
+
+                # Helper to safely get and round numbers
+                def safe_get(key, decimals=2):
+                    val = info.get(key)
+                    if val is None:
+                        return None
+                    try:
+                        return round(float(val), decimals)
+                    except (TypeError, ValueError):
+                        return val
+
+                # Helper to format large numbers
+                def format_large_num(val):
+                    if val is None:
+                        return None
+                    if val >= 1_000_000_000_000:
+                        return f"${val / 1_000_000_000_000:.2f}T"
+                    elif val >= 1_000_000_000:
+                        return f"${val / 1_000_000_000:.2f}B"
+                    elif val >= 1_000_000:
+                        return f"${val / 1_000_000:.2f}M"
+                    else:
+                        return f"${val:,.0f}"
+
+                market_cap_raw = info.get('marketCap')
+                revenue_raw = info.get('totalRevenue')
+
+                return {
+                    "symbol": symbol.upper(),
+                    "name": info.get('shortName') or info.get('longName', 'Unknown'),
+
+                    # Valuation metrics
+                    "pe_ratio_trailing": safe_get('trailingPE'),
+                    "pe_ratio_forward": safe_get('forwardPE'),
+                    "peg_ratio": safe_get('pegRatio'),
+                    "price_to_book": safe_get('priceToBook'),
+                    "price_to_sales": safe_get('priceToSalesTrailing12Months'),
+
+                    # Earnings
+                    "eps_trailing": safe_get('trailingEps'),
+                    "eps_forward": safe_get('forwardEps'),
+
+                    # Market cap & enterprise value
+                    "market_cap": market_cap_raw,
+                    "market_cap_formatted": format_large_num(market_cap_raw),
+                    "enterprise_value": info.get('enterpriseValue'),
+                    "enterprise_value_formatted": format_large_num(info.get('enterpriseValue')),
+
+                    # Revenue & profitability
+                    "revenue": revenue_raw,
+                    "revenue_formatted": format_large_num(revenue_raw),
+                    "revenue_per_share": safe_get('revenuePerShare'),
+                    "profit_margin": safe_get('profitMargins', 4),
+                    "operating_margin": safe_get('operatingMargins', 4),
+                    "gross_margin": safe_get('grossMargins', 4),
+                    "ebitda": info.get('ebitda'),
+                    "ebitda_formatted": format_large_num(info.get('ebitda')),
+
+                    # Dividends
+                    "dividend_yield": safe_get('dividendYield', 4),
+                    "dividend_yield_percent": f"{(info.get('dividendYield') or 0) * 100:.2f}%" if info.get('dividendYield') else None,
+                    "dividend_rate": safe_get('dividendRate'),
+                    "payout_ratio": safe_get('payoutRatio', 4),
+                    "ex_dividend_date": info.get('exDividendDate'),
+
+                    # 52-week range
+                    "fifty_two_week_high": safe_get('fiftyTwoWeekHigh'),
+                    "fifty_two_week_low": safe_get('fiftyTwoWeekLow'),
+                    "fifty_day_average": safe_get('fiftyDayAverage'),
+                    "two_hundred_day_average": safe_get('twoHundredDayAverage'),
+
+                    # Analyst data
+                    "analyst_target_price": safe_get('targetMeanPrice'),
+                    "analyst_target_high": safe_get('targetHighPrice'),
+                    "analyst_target_low": safe_get('targetLowPrice'),
+                    "analyst_recommendation": info.get('recommendationKey'),
+                    "number_of_analysts": info.get('numberOfAnalystOpinions'),
+
+                    # Shares & float
+                    "shares_outstanding": info.get('sharesOutstanding'),
+                    "float_shares": info.get('floatShares'),
+                    "short_ratio": safe_get('shortRatio'),
+                    "short_percent_of_float": safe_get('shortPercentOfFloat', 4),
+
+                    # Beta & volatility
+                    "beta": safe_get('beta'),
+
+                    # Additional context
+                    "sector": info.get('sector', 'N/A'),
+                    "industry": info.get('industry', 'N/A'),
+
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source": "yfinance"
+                }
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, fetch_fundamentals)
+
+            # Cache fundamentals for 15 minutes (they don't change often)
+            self._set_cached(cache_key, result, ttl=900)
+
+            return {
+                "success": True,
+                "data": result
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching fundamental data for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
 
 # Global instance for easy access
 # TEMPORARY: This will be removed when migrating to atomik-data-hub

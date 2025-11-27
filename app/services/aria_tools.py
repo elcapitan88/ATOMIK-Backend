@@ -84,6 +84,23 @@ ARIA_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_fundamental_data",
+            "description": "Get fundamental/financial data for a stock including P/E ratio, EPS, market cap, revenue, profit margins, dividends, 52-week range, and analyst recommendations. Use when user asks about valuation, earnings, financials, fundamentals, P/E, market cap, dividends, or analyst targets.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker symbol"
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }
+    },
     # -------------------------------------------------------------------------
     # User Data Tools
     # -------------------------------------------------------------------------
@@ -266,6 +283,7 @@ class ARIAToolExecutor:
             "get_stock_quote": self._get_stock_quote,
             "get_historical_data": self._get_historical_data,
             "get_company_info": self._get_company_info,
+            "get_fundamental_data": self._get_fundamental_data,
             "get_user_positions": self._get_user_positions,
             "get_active_strategies": self._get_active_strategies,
             "get_trading_performance": self._get_trading_performance,
@@ -378,6 +396,15 @@ class ARIAToolExecutor:
 
         if not result.get("success"):
             return {"error": result.get("error", "Failed to fetch company info")}
+
+        return result.get("data", {})
+
+    async def _get_fundamental_data(self, symbol: str) -> Dict[str, Any]:
+        """Get fundamental/financial data for a stock"""
+        result = await self.market_service.get_fundamental_data(symbol)
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Failed to fetch fundamental data")}
 
         return result.get("data", {})
 
@@ -539,16 +566,24 @@ You have access to tools that let you:
    - "Show me SPY's weekly range"
    - "How has AAPL performed this month?"
 
-3. **Portfolio questions** → Use get_user_positions
+3. **Fundamental/Financial data** → Use get_fundamental_data
+   - "What's Apple's P/E ratio?"
+   - "What's the market cap of NVDA?"
+   - "Does MSFT pay dividends?"
+   - "What do analysts think about TSLA?"
+   - "What's Tesla's EPS?"
+   - "Show me Amazon's profit margins"
+
+4. **Portfolio questions** → Use get_user_positions
    - "What positions do I have?"
    - "Do I own any AAPL?"
    - "Show me my holdings"
 
-4. **Strategy questions** → Use get_active_strategies
+5. **Strategy questions** → Use get_active_strategies
    - "What strategies are running?"
    - "Show me my active automations"
 
-5. **Performance questions** → Use get_trading_performance
+6. **Performance questions** → Use get_trading_performance
    - "How am I doing today?"
    - "What's my P&L this week?"
 
