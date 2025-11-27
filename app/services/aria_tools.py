@@ -898,8 +898,9 @@ class ARIAToolExecutor:
             return {"error": result.get("error", "Failed to fetch FRED series")}
 
         data = result.get("data", {})
-        series_info = data.get("series_info", {})
-        observations = data.get("observations", [])
+        # Data Hub returns "series" and "data" (not "series_info" and "observations")
+        series_info = data.get("series", {}) or data.get("series_info", {})
+        observations = data.get("data", []) or data.get("observations", [])
 
         # Format observations for display
         formatted_obs = []
