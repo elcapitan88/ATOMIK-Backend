@@ -982,14 +982,22 @@ class ARIAToolExecutor:
         if not result.get("success"):
             return {"error": result.get("error", "Failed to fetch economic calendar")}
 
-        data = result.get("data", {})
+        # Data Hub returns a list of events directly
+        data = result.get("data", [])
+
+        # Handle both list format (from Data Hub) and dict format (potential future)
+        if isinstance(data, list):
+            events = data
+        else:
+            # If dict, try to extract events list
+            events = data.get("releases", data.get("events", []))
 
         return {
-            "upcoming_releases": data.get("releases", []),
-            "this_week": data.get("this_week", []),
-            "next_week": data.get("next_week", []),
+            "events": events,
+            "event_count": len(events),
             "timestamp": result.get("timestamp"),
-            "source": result.get("source", "fred")
+            "source": result.get("source", "fred"),
+            "note": result.get("note")
         }
 
     async def _search_fred_series(
