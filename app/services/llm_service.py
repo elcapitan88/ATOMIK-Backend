@@ -894,37 +894,32 @@ Guidelines:
         system_prompt: str
     ) -> Dict[str, Any]:
         """Get final response from Groq after tool execution"""
-        # Modify system prompt to prevent additional tool calls in final response
-        final_system_prompt = system_prompt + "\n\nIMPORTANT: You have already executed the necessary tools. Now respond to the user based on the tool results provided. Do NOT call any more tools - just provide a helpful, conversational response using the data you received."
+        # Format tool results as context to embed in the user message
+        # This avoids Groq treating this as a tool-calling conversation
+        tool_context_parts = []
+        for result in tool_results:
+            tool_name = result.get("name", "unknown")
+            tool_data = result.get("result", {})
+            tool_context_parts.append(f"[{tool_name} result]:\n{json.dumps(tool_data, indent=2)}")
 
-        # Build messages with tool results
+        tool_context = "\n\n".join(tool_context_parts)
+
+        # Build simple messages without tool call structure
+        final_system_prompt = system_prompt + "\n\nIMPORTANT: You have already executed the necessary data-fetching tools. The tool results are provided below. Now respond to the user based on this data. Do NOT attempt to call any more tools - just provide a helpful, conversational response synthesizing the information."
+
+        # Combine original query with tool results context
+        combined_user_message = f"""User's question: {original_query}
+
+Here is the data I retrieved for you:
+
+{tool_context}
+
+Please provide a helpful response based on this data."""
+
         messages = [
             {"role": "system", "content": final_system_prompt},
-            {"role": "user", "content": original_query},
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": tc["arguments"] if isinstance(tc["arguments"], str) else json.dumps(tc["arguments"])
-                        }
-                    }
-                    for tc in tool_calls
-                ]
-            }
+            {"role": "user", "content": combined_user_message}
         ]
-
-        # Add tool results
-        for result in tool_results:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": result["tool_call_id"],
-                "content": json.dumps(result["result"])
-            })
 
         response = self.client.chat.completions.create(
             model=self.model,

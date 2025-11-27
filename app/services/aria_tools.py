@@ -511,6 +511,10 @@ class ARIAToolExecutor:
             logger.warning(f"Unknown tool: {tool_name}")
             return {"error": f"Unknown tool: {tool_name}"}
 
+        # Clean up malformed arguments (e.g., LLM generating '{"":{}}'  instead of '{}')
+        if isinstance(arguments, dict):
+            arguments = {k: v for k, v in arguments.items() if k and k.strip()}
+
         try:
             logger.info(f"Executing tool: {tool_name} with args: {arguments}")
             result = await handler(**arguments)
@@ -545,6 +549,11 @@ class ARIAToolExecutor:
                     arguments = json.loads(arguments)
                 except json.JSONDecodeError:
                     arguments = {}
+
+            # Clean up malformed arguments (e.g., LLM generating '{"":{}}'  instead of '{}')
+            if isinstance(arguments, dict):
+                # Remove empty string keys and None values
+                arguments = {k: v for k, v in arguments.items() if k and k.strip()}
 
             result = await self.execute(tool_name, arguments)
             results.append({
