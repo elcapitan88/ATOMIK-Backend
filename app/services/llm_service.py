@@ -894,9 +894,12 @@ Guidelines:
         system_prompt: str
     ) -> Dict[str, Any]:
         """Get final response from Groq after tool execution"""
+        # Modify system prompt to prevent additional tool calls in final response
+        final_system_prompt = system_prompt + "\n\nIMPORTANT: You have already executed the necessary tools. Now respond to the user based on the tool results provided. Do NOT call any more tools - just provide a helpful, conversational response using the data you received."
+
         # Build messages with tool results
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": final_system_prompt},
             {"role": "user", "content": original_query},
             {
                 "role": "assistant",
@@ -1029,6 +1032,55 @@ Guidelines:
             elif name == "get_active_strategies":
                 count = data.get("active_count", 0)
                 parts.append(f"You have {count} active strategy(ies).")
+            # FRED Economic Data fallback formatting
+            elif name == "get_fred_series":
+                series_id = data.get("series_id", "")
+                title = data.get("title", series_id)
+                latest_value = data.get("latest_value")
+                latest_date = data.get("latest_date", "")
+                units = data.get("units", "")
+                if latest_value is not None:
+                    parts.append(f"{title}: {latest_value} {units} (as of {latest_date})")
+                else:
+                    parts.append(f"Retrieved data for {title}.")
+            elif name == "get_interest_rates":
+                fed_rate = data.get("fed_funds_rate")
+                t10y = data.get("treasury_10y")
+                mortgage = data.get("mortgage_30y")
+                rate_parts = []
+                if fed_rate:
+                    rate_parts.append(f"Fed Funds: {fed_rate}%")
+                if t10y:
+                    rate_parts.append(f"10Y Treasury: {t10y}%")
+                if mortgage:
+                    rate_parts.append(f"30Y Mortgage: {mortgage}%")
+                if rate_parts:
+                    parts.append("Current rates: " + ", ".join(rate_parts))
+                else:
+                    parts.append("Interest rate data retrieved.")
+            elif name == "get_economic_snapshot":
+                indicators = data.get("gdp", {})
+                unemployment = data.get("unemployment", {})
+                inflation = data.get("inflation", {})
+                snap_parts = []
+                if unemployment.get("value"):
+                    snap_parts.append(f"Unemployment: {unemployment['value']}%")
+                if inflation.get("value"):
+                    snap_parts.append(f"Inflation: {inflation['value']}%")
+                if snap_parts:
+                    parts.append("Economic snapshot: " + ", ".join(snap_parts))
+                else:
+                    parts.append("Economic snapshot data retrieved.")
+            elif name == "get_economic_calendar":
+                releases = data.get("upcoming_releases", [])
+                if releases:
+                    parts.append(f"Found {len(releases)} upcoming economic releases.")
+                else:
+                    parts.append("Economic calendar data retrieved.")
+            elif name == "search_fred_series":
+                result_count = data.get("result_count", 0)
+                query = data.get("query", "")
+                parts.append(f"Found {result_count} FRED series matching '{query}'.")
             else:
                 parts.append(f"Data retrieved for {name}.")
 
