@@ -4,6 +4,26 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from ..db.base_class import Base
 
+
+class ARIAConversation(Base):
+    """
+    Represents a conversation thread with ARIA.
+    Each user can have multiple conversations, each with its own history.
+    Conversations are retained for 15 days before automatic cleanup.
+    """
+    __tablename__ = "aria_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    title = Column(String(255), nullable=True)  # Auto-generated from first message, user-editable
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_archived = Column(Boolean, default=False, index=True)  # Soft delete flag
+
+    # Relationships
+    user = relationship("User")
+    interactions = relationship("ARIAInteraction", back_populates="conversation", order_by="ARIAInteraction.timestamp")
+
 class UserTradingProfile(Base):
     """
     Comprehensive user trading profile for ARIA context and pattern analysis
@@ -100,6 +120,7 @@ class ARIAInteraction(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_profile_id = Column(Integer, ForeignKey("user_trading_profiles.id"), index=True)
     trading_session_id = Column(Integer, ForeignKey("user_trading_sessions.id"), nullable=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("aria_conversations.id"), nullable=True, index=True)
     
     # Interaction Details
     interaction_type = Column(String, index=True)  # "voice", "text", "action", "proactive"
@@ -146,6 +167,7 @@ class ARIAInteraction(Base):
     # Relationships
     user_profile = relationship("UserTradingProfile", back_populates="aria_interactions")
     trading_session = relationship("UserTradingSession", back_populates="aria_interactions")
+    conversation = relationship("ARIAConversation", back_populates="interactions")
 
 class ARIAContextCache(Base):
     """

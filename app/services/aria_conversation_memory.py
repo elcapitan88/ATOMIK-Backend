@@ -227,7 +227,9 @@ class ConversationMemory:
 
 
 # Global instance for easy access across the application
+# Updated to support longer conversations (100 messages = 50 turns)
+# This is well within Groq's 128K token context window
 conversation_memory = ConversationMemory(
-    max_turns=10,
+    max_turns=50,  # 100 messages (50 user + 50 assistant)
     session_timeout_minutes=30
 )

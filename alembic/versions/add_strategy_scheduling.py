@@ -1,7 +1,7 @@
 """Add strategy scheduling fields
 
 Revision ID: add_strategy_scheduling
-Revises: add_stripe_webhook_logs
+Revises: 0318102422e0
 Create Date: 2025-01-08
 
 """
@@ -11,7 +11,7 @@ from datetime import datetime
 
 # revision identifiers
 revision = 'add_strategy_scheduling'
-down_revision = 'add_stripe_webhook_logs'
+down_revision = '0318102422e0'
 branch_labels = None
 depends_on = None
 

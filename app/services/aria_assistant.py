@@ -71,7 +71,8 @@ class ARIAAssistant:
         user_id: int,
         input_text: str,
         input_type: str = "text",
-        use_premium: bool = False
+        use_premium: bool = False,
+        conversation_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Main entry point for all ARIA interactions
@@ -81,6 +82,7 @@ class ARIAAssistant:
             input_text: Raw user input (voice transcript or typed text)
             input_type: "voice" or "text"
             use_premium: Use premium LLM provider (Anthropic) instead of economy (Groq)
+            conversation_id: Optional conversation ID for persistence
 
         Returns:
             Complete response with action results and ARIA reply
@@ -91,7 +93,7 @@ class ARIAAssistant:
         # Route to tool-calling architecture if enabled
         if self.USE_TOOL_CALLING:
             logger.info("[ARIA] Using tool-calling architecture")
-            return await self._process_with_tools(user_id, input_text, input_type, use_premium)
+            return await self._process_with_tools(user_id, input_text, input_type, use_premium, conversation_id)
 
         # Legacy flow (deprecated) - kept for backward compatibility
         logger.info("[ARIA] Using legacy intent-based architecture")
@@ -196,7 +198,8 @@ class ARIAAssistant:
         user_id: int,
         input_text: str,
         input_type: str = "text",
-        use_premium: bool = False
+        use_premium: bool = False,
+        conversation_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Process user input using LLM tool-calling architecture.
@@ -213,6 +216,7 @@ class ARIAAssistant:
             input_text: Raw user input
             input_type: "voice" or "text"
             use_premium: Use premium LLM (Anthropic) vs economy (Groq)
+            conversation_id: Optional conversation ID for persistence
 
         Returns:
             Complete response with action results and ARIA reply
@@ -267,7 +271,8 @@ class ARIAAssistant:
                 input_type,
                 intent,
                 risk_level,
-                requires_confirmation
+                requires_confirmation,
+                conversation_id=conversation_id
             )
 
             # 5. Build response object
@@ -329,7 +334,7 @@ class ARIAAssistant:
 
             # Create error interaction
             error_interaction = await self._create_error_interaction(
-                user_id, input_text, input_type, str(e)
+                user_id, input_text, input_type, str(e), conversation_id=conversation_id
             )
 
             processing_time = int((datetime.utcnow() - interaction_start).total_seconds() * 1000)
@@ -508,11 +513,13 @@ class ARIAAssistant:
         input_type: str,
         intent: VoiceIntent,
         risk_level: ARIARiskLevel,
-        requires_confirmation: bool
+        requires_confirmation: bool,
+        conversation_id: Optional[int] = None
     ) -> ARIAInteraction:
         """Create a new interaction record"""
         interaction = ARIAInteraction(
             user_profile_id=user_profile_id,
+            conversation_id=conversation_id,
             interaction_type=input_type,
             input_method=input_type,
             raw_input=raw_input,
@@ -523,11 +530,11 @@ class ARIAAssistant:
             risk_level=risk_level.value,
             timestamp=datetime.utcnow()
         )
-        
+
         self.db.add(interaction)
         self.db.commit()
         self.db.refresh(interaction)
-        
+
         return interaction
     
     async def _create_error_interaction(
@@ -535,13 +542,15 @@ class ARIAAssistant:
         user_id: int,
         raw_input: str,
         input_type: str,
-        error_message: str
+        error_message: str,
+        conversation_id: Optional[int] = None
     ) -> ARIAInteraction:
         """Create error interaction record"""
         user_profile = await self._get_or_create_user_profile(user_id)
-        
+
         interaction = ARIAInteraction(
             user_profile_id=user_profile.id,
+            conversation_id=conversation_id,
             interaction_type=input_type,
             input_method=input_type,
             raw_input=raw_input,
@@ -550,11 +559,11 @@ class ARIAAssistant:
             action_success=False,
             timestamp=datetime.utcnow()
         )
-        
+
         self.db.add(interaction)
         self.db.commit()
         self.db.refresh(interaction)
-        
+
         return interaction
     
     async def _handle_confirmation_request(
