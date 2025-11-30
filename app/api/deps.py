@@ -1,6 +1,6 @@
 """API dependencies."""
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from typing import Generator, Optional
@@ -8,13 +8,14 @@ import logging
 
 from app.db.base import get_db
 from app.core.security import get_current_user, decode_access_token
+from app.core.config import settings
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 # Re-export for convenience
-__all__ = ["get_db", "get_current_active_user", "get_current_user_optional"]
+__all__ = ["get_db", "get_current_active_user", "get_current_user_optional", "verify_internal_api_key"]
 
 
 def get_current_active_user(
@@ -71,3 +72,29 @@ def get_current_user_optional(
     except Exception as e:
         logger.debug(f"Optional auth failed: {str(e)}")
         return None
+
+
+def verify_internal_api_key(
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+) -> bool:
+    """
+    Verify internal API key for service-to-service authentication.
+    Used by Discord bot and other internal services.
+    """
+    if not settings.INTERNAL_API_KEY:
+        logger.warning("INTERNAL_API_KEY not configured - internal endpoints are unprotected!")
+        return True  # Allow in development if not configured
+
+    if not x_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key"
+        )
+
+    if x_api_key != settings.INTERNAL_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid API key"
+        )
+
+    return True

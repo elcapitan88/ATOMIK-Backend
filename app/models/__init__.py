@@ -14,6 +14,7 @@ from .strategy_pricing import StrategyPricing, PricingType, BillingInterval
 from .strategy_purchase import StrategyPurchase, PurchaseStatus, PurchaseType
 from .creator_earnings import CreatorEarnings, PayoutStatus
 from .strategy_monetization import StrategyMonetization, StrategyPrice
+from .discord import DiscordLink, DiscordUserThread, PendingDiscordLink
 # TODO: Uncomment after strategy_metrics table migration is fixed
 # from .strategy_metrics import StrategyMetrics, CreatorDashboardCache
 
@@ -45,7 +46,10 @@ __all__ = [
     "CreatorEarnings",
     "PayoutStatus",
     "StrategyMonetization",
-    "StrategyPrice"
+    "StrategyPrice",
+    "DiscordLink",
+    "DiscordUserThread",
+    "PendingDiscordLink",
     # TODO: Uncomment after strategy_metrics table migration is fixed
     # "StrategyMetrics",
     # "CreatorDashboardCache"

@@ -16,8 +16,8 @@ try:
     logger.info("Admin endpoint imported successfully")
     
     # Import working endpoints (excluding interactivebrokers which breaks)
-    from .endpoints import creators, chat, feature_flags, marketplace, aria, affiliate, creator_profiles
-    logger.info("Working endpoints imported successfully (including ARIA and affiliate)")
+    from .endpoints import creators, chat, feature_flags, marketplace, aria, affiliate, creator_profiles, discord
+    logger.info("Working endpoints imported successfully (including ARIA, affiliate, and Discord)")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -118,6 +118,13 @@ try:
     logger.info("Interactive Brokers router registered")
 except Exception as e:
     logger.error(f"Error registering Interactive Brokers router: {e}")
+
+# Discord Integration router
+try:
+    api_router.include_router(discord.router, prefix="/discord", tags=["discord-integration"])
+    logger.info("Discord Integration router registered")
+except Exception as e:
+    logger.error(f"Error registering Discord router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"

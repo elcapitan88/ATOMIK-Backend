@@ -250,6 +250,19 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.1-70b-versatile"  # Fast and capable
 
+    # Discord Integration Settings
+    DISCORD_CLIENT_ID: Optional[str] = None
+    DISCORD_CLIENT_SECRET: Optional[str] = None
+    DISCORD_BOT_TOKEN: Optional[str] = None  # For bot operations (not OAuth)
+
+    # Internal API Key for service-to-service authentication (Discord bot, etc.)
+    INTERNAL_API_KEY: Optional[str] = None
+
+    @property
+    def API_BASE_URL(self) -> str:
+        """Get the API base URL for callbacks."""
+        return self.active_server_host
+
     def get_stripe_price_id(self, tier: str, interval: str) -> str:
         """Get the Stripe Price ID for a specific tier and interval with validation"""
         if tier not in ['pro', 'elite']:
