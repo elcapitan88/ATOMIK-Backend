@@ -344,10 +344,7 @@ class Settings(BaseSettings):
 
     @property
     def active_frontend_url(self) -> str:
-        if self.ENVIRONMENT == "production" and self.PROD_FRONTEND_URL:
-            return self.PROD_FRONTEND_URL
-        elif self.ENVIRONMENT == "development" and self.DEV_FRONTEND_URL:
-            return self.DEV_FRONTEND_URL
+        """Get frontend URL - uses FRONTEND_URL directly."""
         return self.FRONTEND_URL
 
     @property
