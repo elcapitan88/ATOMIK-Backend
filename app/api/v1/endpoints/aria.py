@@ -903,8 +903,7 @@ async def internal_aria_chat(
             title = generate_conversation_title(request.message)
             conversation = ARIAConversation(
                 user_id=user_id,
-                title=title,
-                source=request.source
+                title=title
             )
             db.add(conversation)
             db.flush()
