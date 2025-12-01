@@ -913,9 +913,8 @@ async def internal_aria_chat(
 
         result = await aria.process_user_input(
             user_id=user_id,
-            message=request.message,
+            input_text=request.message,
             input_type=request.input_type,
-            context={"source": request.source, "platform": "discord"},
             conversation_id=conversation_id
         )
 
