@@ -250,32 +250,36 @@ async def discord_oauth_callback(
     discord_data = await exchange_discord_code(code, redirect_uri)
     discord_user = discord_data["user"]
 
-    # Check if this Discord account is already linked to another user
+    # Check if this Discord account already has a link (active or inactive)
     existing_link = db.query(DiscordLink).filter(
-        DiscordLink.discord_user_id == str(discord_user["id"]),
-        DiscordLink.is_active == True
+        DiscordLink.discord_user_id == str(discord_user["id"])
     ).first()
 
-    if existing_link and existing_link.user_id != user_id:
+    # If linked to another user and active, block it
+    if existing_link and existing_link.user_id != user_id and existing_link.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This Discord account is already linked to another Atomik account"
         )
 
+    # Deactivate any other links for this user (switching Discord accounts)
+    db.query(DiscordLink).filter(
+        DiscordLink.user_id == user_id,
+        DiscordLink.discord_user_id != str(discord_user["id"])
+    ).update({"is_active": False})
+
     # Create or update link
     if existing_link:
-        # Update existing link
+        # Update and reactivate existing link
+        existing_link.user_id = user_id
         existing_link.discord_username = discord_user.get("username")
         existing_link.discord_avatar = discord_user.get("avatar")
         existing_link.access_token = discord_data.get("access_token")
         existing_link.refresh_token = discord_data.get("refresh_token")
+        existing_link.token_expires_at = datetime.utcnow() + timedelta(seconds=discord_data.get("expires_in", 604800))
+        existing_link.is_active = True
         existing_link.last_used_at = datetime.utcnow()
     else:
-        # Deactivate any old links for this user
-        db.query(DiscordLink).filter(
-            DiscordLink.user_id == user_id
-        ).update({"is_active": False})
-
         # Create new link
         new_link = DiscordLink(
             user_id=user_id,
