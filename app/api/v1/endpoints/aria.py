@@ -832,3 +832,164 @@ async def get_aria_analytics(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analytics retrieval failed: {str(e)}"
         )
+
+
+# ==================== Internal Endpoints (for Discord Bot) ====================
+
+from fastapi import Header
+from ....api.deps import verify_internal_api_key
+
+
+class InternalARIARequest(BaseModel):
+    """Request model for internal ARIA calls from Discord bot."""
+    message: str
+    input_type: str = "text"
+    source: str = "discord"
+    conversation_id: Optional[int] = None
+
+
+class InternalConfirmRequest(BaseModel):
+    """Request model for internal confirmation calls."""
+    interaction_id: int
+    confirmed: bool
+
+
+@router.post("/internal/chat", response_model=ARIAResponse)
+async def internal_aria_chat(
+    request: InternalARIARequest,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_internal_api_key)
+):
+    """
+    Internal ARIA chat endpoint for Discord bot.
+
+    Requires internal API key and X-User-ID header.
+    """
+    try:
+        user_id = int(x_user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid X-User-ID header"
+        )
+
+    # Verify user exists
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    logger.info(f"[ARIA Internal] Chat from Discord for user {user_id}: '{request.message[:50]}...'")
+
+    try:
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+
+        # Handle conversation - create new if not provided
+        if conversation_id:
+            conversation = db.query(ARIAConversation).filter(
+                ARIAConversation.id == conversation_id,
+                ARIAConversation.user_id == user_id,
+                ARIAConversation.is_archived == False
+            ).first()
+            if not conversation:
+                conversation_id = None
+
+        if not conversation_id:
+            is_new_conversation = True
+            title = generate_conversation_title(request.message)
+            conversation = ARIAConversation(
+                user_id=user_id,
+                title=title,
+                source=request.source
+            )
+            db.add(conversation)
+            db.flush()
+            conversation_id = conversation.id
+
+        aria = ARIAAssistant(db)
+
+        result = await aria.process_user_input(
+            user_id=user_id,
+            message=request.message,
+            input_type=request.input_type,
+            context={"source": request.source, "platform": "discord"},
+            conversation_id=conversation_id
+        )
+
+        # Update conversation timestamp
+        if not is_new_conversation:
+            conversation = db.query(ARIAConversation).filter(
+                ARIAConversation.id == conversation_id
+            ).first()
+            if conversation:
+                conversation.updated_at = datetime.utcnow()
+
+        db.commit()
+
+        return ARIAResponse(
+            success=result["success"],
+            response=result["response"],
+            interaction_id=result.get("interaction_id"),
+            conversation_id=conversation_id,
+            requires_confirmation=result.get("requires_confirmation", False),
+            action_result=result.get("action_result"),
+            processing_time_ms=result.get("processing_time_ms"),
+            error=result.get("error")
+        )
+
+    except Exception as e:
+        logger.error(f"[ARIA Internal] Error for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"ARIA processing failed: {str(e)}"
+        )
+
+
+@router.post("/internal/confirm", response_model=ARIAResponse)
+async def internal_aria_confirm(
+    request: InternalConfirmRequest,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_internal_api_key)
+):
+    """
+    Internal confirmation endpoint for Discord bot.
+
+    Requires internal API key and X-User-ID header.
+    """
+    try:
+        user_id = int(x_user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid X-User-ID header"
+        )
+
+    logger.info(f"[ARIA Internal] Confirmation from Discord for user {user_id}: interaction={request.interaction_id}")
+
+    try:
+        aria = ARIAAssistant(db)
+
+        result = await aria.handle_confirmation_response(
+            user_id=user_id,
+            interaction_id=request.interaction_id,
+            confirmed=request.confirmed
+        )
+
+        return ARIAResponse(
+            success=result["success"],
+            response=result["response"],
+            action_result=result.get("action_result"),
+            error=result.get("error")
+        )
+
+    except Exception as e:
+        logger.error(f"[ARIA Internal] Confirmation error for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Confirmation processing failed: {str(e)}"
+        )
