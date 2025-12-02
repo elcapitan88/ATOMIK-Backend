@@ -31,7 +31,7 @@ class FuturesContractManager:
     }
     
     # Base symbols for futures contracts (quarterly)
-    FUTURES_SYMBOLS = ['ES', 'NQ', 'CL', 'GC', 'MES', 'MNQ', 'RTY', 'YM']
+    FUTURES_SYMBOLS = ['ES', 'NQ', 'CL', 'GC', 'MES', 'MNQ', 'MGC', 'RTY', 'YM']
     
     # Monthly expiring futures contracts
     MONTHLY_FUTURES_SYMBOLS = ['MBT']
