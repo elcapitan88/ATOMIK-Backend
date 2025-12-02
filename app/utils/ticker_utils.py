@@ -32,22 +32,30 @@ def validate_ticker(ticker: str) -> Tuple[bool, str]:
     """
     Validate if a ticker is supported.
     Accepts both display tickers (ES) and contract tickers (ESU5).
+    Returns (is_valid, result_or_error_message).
     """
+    if not ticker:
+        return False, "Ticker cannot be empty"
+
+    # Normalize ticker - uppercase and strip whitespace
+    normalized_ticker = ticker.strip().upper()
+
     all_symbols = FuturesContractManager.FUTURES_SYMBOLS + FuturesContractManager.MONTHLY_FUTURES_SYMBOLS
-    
+
     # Check if it's a valid display ticker (e.g., "ES", "MBT")
-    if ticker in all_symbols:
-        return True, get_contract_ticker(ticker)
-    
+    if normalized_ticker in all_symbols:
+        return True, get_contract_ticker(normalized_ticker)
+
     # Check if it's a valid contract ticker (e.g., "ESU5", "MBTQ5")
     # Extract base symbol and validate
     for symbol in all_symbols:
-        if ticker.startswith(symbol) and len(ticker) == len(symbol) + 2:
+        if normalized_ticker.startswith(symbol) and len(normalized_ticker) == len(symbol) + 2:
             # Verify it matches current contract format
             current_contracts = get_current_futures_contracts()
-            if ticker == current_contracts.get(symbol):
-                return True, ticker
+            if normalized_ticker == current_contracts.get(symbol):
+                return True, normalized_ticker
             # Even if not current contract, still valid format
-            return True, ticker
-    
-    return False, ""
+            return True, normalized_ticker
+
+    # Return helpful error message with valid options
+    return False, f"'{ticker}' is not a supported ticker. Valid tickers: {', '.join(all_symbols)}"
