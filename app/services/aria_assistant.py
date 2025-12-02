@@ -72,7 +72,8 @@ class ARIAAssistant:
         input_text: str,
         input_type: str = "text",
         use_premium: bool = False,
-        conversation_id: Optional[int] = None
+        conversation_id: Optional[int] = None,
+        timezone: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Main entry point for all ARIA interactions
@@ -83,17 +84,18 @@ class ARIAAssistant:
             input_type: "voice" or "text"
             use_premium: Use premium LLM provider (Anthropic) instead of economy (Groq)
             conversation_id: Optional conversation ID for persistence
+            timezone: User's timezone for time-aware responses (e.g., "America/Chicago")
 
         Returns:
             Complete response with action results and ARIA reply
         """
         interaction_start = datetime.utcnow()
-        logger.info(f"[ARIA] process_user_input started for user {user_id}: '{input_text[:100]}...'")
+        logger.info(f"[ARIA] process_user_input started for user {user_id}: '{input_text[:100]}...' (timezone={timezone})")
 
         # Route to tool-calling architecture if enabled
         if self.USE_TOOL_CALLING:
             logger.info("[ARIA] Using tool-calling architecture")
-            return await self._process_with_tools(user_id, input_text, input_type, use_premium, conversation_id)
+            return await self._process_with_tools(user_id, input_text, input_type, use_premium, conversation_id, timezone)
 
         # Legacy flow (deprecated) - kept for backward compatibility
         logger.info("[ARIA] Using legacy intent-based architecture")
@@ -199,7 +201,8 @@ class ARIAAssistant:
         input_text: str,
         input_type: str = "text",
         use_premium: bool = False,
-        conversation_id: Optional[int] = None
+        conversation_id: Optional[int] = None,
+        timezone: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Process user input using LLM tool-calling architecture.
@@ -217,6 +220,7 @@ class ARIAAssistant:
             input_type: "voice" or "text"
             use_premium: Use premium LLM (Anthropic) vs economy (Groq)
             conversation_id: Optional conversation ID for persistence
+            timezone: User's timezone for time-aware responses (e.g., "America/Chicago")
 
         Returns:
             Complete response with action results and ARIA reply
@@ -231,7 +235,7 @@ class ARIAAssistant:
 
             # 2. Get conversation history for context
             conversation_history = conversation_memory.get_history(user_id)
-            logger.info(f"[ARIA-Tools] Processing with {len(conversation_history)} previous messages")
+            logger.info(f"[ARIA-Tools] Processing with {len(conversation_history)} previous messages (timezone={timezone})")
 
             # 3. Use LLM with tools to process the query
             logger.info(f"[ARIA-Tools] Processing: '{input_text[:50]}...' with tools")
@@ -241,7 +245,8 @@ class ARIAAssistant:
                 user_id=user_id,
                 db=self.db,
                 use_premium=use_premium,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                timezone=timezone
             )
 
             # 3. Determine risk level and create interaction record

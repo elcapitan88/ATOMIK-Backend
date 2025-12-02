@@ -611,7 +611,8 @@ Guidelines:
         user_id: int,
         db: Any,
         use_premium: bool = False,
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        timezone: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Main entry point for tool-calling architecture.
@@ -623,6 +624,7 @@ Guidelines:
             db: Database session
             use_premium: Use Anthropic (premium) instead of Groq (economy)
             conversation_history: Previous messages for context (enables multi-turn conversations)
+            timezone: User's timezone for time-aware responses (e.g., "America/Chicago")
 
         Returns:
             Response dictionary with text and metadata
@@ -651,7 +653,28 @@ Guidelines:
                 "provider": "none"
             }
 
-        logger.info(f"Processing query with tools: '{user_query[:50]}...' using {provider}")
+        # Build system prompt with timezone context
+        system_prompt = ARIA_TOOL_CALLING_SYSTEM_PROMPT
+        if timezone:
+            # Get current time in user's timezone for context
+            try:
+                import pytz
+                from datetime import datetime
+                tz = pytz.timezone(timezone)
+                user_local_time = datetime.now(tz)
+                time_context = f"""
+
+IMPORTANT TIME CONTEXT:
+- User's timezone: {timezone}
+- User's local time: {user_local_time.strftime('%Y-%m-%d %H:%M %Z')}
+- User's local day: {user_local_time.strftime('%A')}
+
+When the user asks about "today", "yesterday", "this week", or any time-relative term, interpret it based on their local timezone ({timezone}), not UTC. For example, if the user asks "what was Apple's closing price today?" - use their local date."""
+                system_prompt = system_prompt + time_context
+            except Exception as e:
+                logger.warning(f"Failed to add timezone context: {e}")
+
+        logger.info(f"Processing query with tools: '{user_query[:50]}...' using {provider} (timezone={timezone})")
 
         try:
             # Initial LLM call with tools
@@ -659,14 +682,14 @@ Guidelines:
                 response = await self._call_anthropic_with_tools(
                     user_query,
                     get_tools_for_anthropic(),
-                    ARIA_TOOL_CALLING_SYSTEM_PROMPT,
+                    system_prompt,
                     conversation_history
                 )
             else:
                 response = await self._call_groq_with_tools(
                     user_query,
                     get_tools_for_groq(),
-                    ARIA_TOOL_CALLING_SYSTEM_PROMPT,
+                    system_prompt,
                     conversation_history
                 )
 
@@ -698,7 +721,7 @@ Guidelines:
                     tool_calls,
                     tool_results,
                     provider,
-                    ARIA_TOOL_CALLING_SYSTEM_PROMPT
+                    system_prompt
                 )
 
                 return {

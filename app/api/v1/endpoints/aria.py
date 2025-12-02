@@ -846,6 +846,7 @@ class InternalARIARequest(BaseModel):
     input_type: str = "text"
     source: str = "discord"
     conversation_id: Optional[int] = None
+    timezone: Optional[str] = None  # User's timezone (e.g., "America/Chicago")
 
 
 class InternalConfirmRequest(BaseModel):
@@ -915,7 +916,8 @@ async def internal_aria_chat(
             user_id=user_id,
             input_text=request.message,
             input_type=request.input_type,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            timezone=request.timezone
         )
 
         # Update conversation timestamp
