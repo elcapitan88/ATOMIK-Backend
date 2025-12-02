@@ -387,6 +387,10 @@ def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
             follower_accounts = strategy.get_follower_accounts() if hasattr(strategy, 'get_follower_accounts') else []
             enriched["follower_accounts"] = follower_accounts
 
+            # Extract follower_account_ids and follower_quantities from the follower_accounts list
+            enriched["follower_account_ids"] = [f.get('account_id') for f in follower_accounts] if follower_accounts else []
+            enriched["follower_quantities"] = [f.get('quantity', 1) for f in follower_accounts] if follower_accounts else []
+
             if strategy.leader_account_id:
                 from app.models import BrokerAccount
                 leader_broker_account = db.query(BrokerAccount).filter(
@@ -407,9 +411,13 @@ def enrich_strategy_data(strategy: ActivatedStrategy, db: Session) -> dict:
         except Exception as e:
             logger.error(f"Error getting follower accounts for strategy {strategy.id}: {e}")
             enriched["follower_accounts"] = []
+            enriched["follower_account_ids"] = []
+            enriched["follower_quantities"] = []
             enriched["leader_broker_account"] = None
     else:
         enriched["follower_accounts"] = []
+        enriched["follower_account_ids"] = []
+        enriched["follower_quantities"] = []
         enriched["leader_broker_account"] = None
 
     return enriched
@@ -435,32 +443,50 @@ async def create_strategy(
     """
     try:
         logger.info(f"Creating {strategy_data.execution_type} strategy for user {current_user.id}")
+        logger.info(f"Strategy data: ticker={strategy_data.ticker}, type={strategy_data.strategy_type}, "
+                   f"account_id={getattr(strategy_data, 'account_id', None)}, "
+                   f"webhook_id={getattr(strategy_data, 'webhook_id', None)}")
 
         # Validate ticker
+        logger.info(f"Validating ticker: {strategy_data.ticker}")
         valid, error_msg = validate_ticker(strategy_data.ticker)
         if not valid:
+            logger.warning(f"Ticker validation failed for user {current_user.id}: {error_msg}")
             raise HTTPException(status_code=400, detail=f"Invalid ticker: {error_msg}")
+        logger.info(f"Ticker validated successfully: {strategy_data.ticker}")
 
         # Validate access to execution source
         if strategy_data.execution_type == ExecutionType.WEBHOOK:
+            logger.info(f"Validating webhook access: {strategy_data.webhook_id}")
             validate_webhook_access(strategy_data.webhook_id, current_user, db)
+            logger.info("Webhook access validated")
         else:
+            logger.info(f"Validating strategy code access: {strategy_data.strategy_code_id}")
             validate_strategy_code_access(strategy_data.strategy_code_id, current_user, db)
+            logger.info("Strategy code access validated")
 
         # Validate account ownership
         if strategy_data.strategy_type == StrategyType.SINGLE:
+            logger.info(f"Validating account ownership: {strategy_data.account_id}")
             validate_account_ownership(strategy_data.account_id, current_user, db)
+            logger.info("Account ownership validated")
         else:
+            logger.info(f"Validating leader account: {strategy_data.leader_account_id}")
             validate_account_ownership(strategy_data.leader_account_id, current_user, db)
             for follower in strategy_data.follower_accounts:
+                logger.info(f"Validating follower account: {follower.account_id}")
                 validate_account_ownership(follower.account_id, current_user, db)
+            logger.info("All account ownerships validated")
 
         # Check for duplicates
+        logger.info("Checking for duplicate strategies")
         if check_duplicate_strategy(strategy_data, current_user.id, db):
+            logger.warning(f"Duplicate strategy detected for user {current_user.id}")
             raise HTTPException(
                 status_code=400,
                 detail="A strategy with these parameters already exists"
             )
+        logger.info("No duplicates found")
 
         # Create strategy based on type
         if strategy_data.strategy_type == StrategyType.SINGLE:
@@ -480,7 +506,10 @@ async def create_strategy(
         db.refresh(strategy)
 
         logger.info(f"Created strategy {strategy.id} successfully")
-        return strategy
+
+        # Enrich strategy data before returning to ensure proper serialization
+        enriched_strategy = enrich_strategy_data(strategy, db)
+        return enriched_strategy
 
     except HTTPException:
         raise
@@ -874,12 +903,9 @@ async def get_strategy(
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
 
-    # Add follower information for multiple strategies
-    if strategy.strategy_type == StrategyType.MULTIPLE:
-        strategy.follower_account_ids = strategy.get_follower_accounts()
-        strategy.follower_quantities = strategy.get_follower_quantities()
-
-    return strategy
+    # Enrich strategy data before returning to ensure proper serialization
+    enriched_strategy = enrich_strategy_data(strategy, db)
+    return enriched_strategy
 
 
 @router.put("/{strategy_id}", response_model=UnifiedStrategyResponse)
@@ -962,13 +988,11 @@ async def update_strategy(
         db.commit()
         db.refresh(strategy)
 
-        # Add follower information for response
-        if strategy.strategy_type == StrategyType.MULTIPLE:
-            strategy.follower_account_ids = strategy.get_follower_accounts()
-            strategy.follower_quantities = strategy.get_follower_quantities()
-
         logger.info(f"Updated strategy {strategy_id} successfully")
-        return strategy
+
+        # Enrich strategy data before returning to ensure proper serialization
+        enriched_strategy = enrich_strategy_data(strategy, db)
+        return enriched_strategy
 
     except HTTPException:
         raise
