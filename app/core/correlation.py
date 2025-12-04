@@ -79,9 +79,13 @@ class CorrelationLogger:
                 msg = f"[{correlation_id[:8]}] {msg}"
             else:
                 msg = f"[{correlation_id[:8]}] {msg}"
-        
+
         self.logger.log(level, msg, *args, **kwargs)
-    
+
+    def log(self, level: int, msg: str, *args, **kwargs):
+        """Log with specified level and correlation ID"""
+        self._log_with_correlation(level, msg, *args, **kwargs)
+
     def debug(self, msg: str, *args, **kwargs):
         self._log_with_correlation(logging.DEBUG, msg, *args, **kwargs)
     
