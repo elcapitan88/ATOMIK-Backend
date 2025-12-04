@@ -17,7 +17,7 @@ DATABASE_URL = "postgresql://postgres:K2Q71c2OIVd1ZIXm8Ad1BFk5jF03Kj33@metro.pro
 # DATABASE_URL = os.environ.get('DATABASE_PRIVATE_URL', DATABASE_URL)
 
 # Strategy details
-STRATEGY_NAME = 'purple_reign'
+STRATEGY_NAME = 'Purple Reign'
 CREATOR_USER_ID = 39  # User who created the original webhook strategies
 
 # Webhook IDs to be replaced

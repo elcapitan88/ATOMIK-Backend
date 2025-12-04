@@ -262,7 +262,7 @@ class TransactionContext:
         """
         Context manager for database transactions with automatic rollback registration
         """
-        async with get_db_context() as db:
+        with get_db_context() as db:
             self._db_session = db
             
             # Register database rollback step
