@@ -482,8 +482,8 @@ async def monitor_ibearmy_servers():
             # Sleep first to ensure app is fully started
             await asyncio.sleep(300)  # 5 minutes
             
-            # Get a database session
-            async with get_db_context() as db:
+            # Get a database session (get_db_context is @contextmanager, not @asynccontextmanager)
+            with get_db_context() as db:
                 # Get all active IB accounts
                 accounts = db.query(BrokerAccount).filter(
                     BrokerAccount.broker_id == "interactivebrokers",
