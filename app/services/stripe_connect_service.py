@@ -291,19 +291,31 @@ class StripeConnectService:
             logger.error(f"Error creating product: {str(e)}")
             raise
     
-    async def cancel_subscription(self, subscription_id: str) -> Dict[str, Any]:
+    async def cancel_subscription(
+        self,
+        subscription_id: str,
+        stripe_account: str = None
+    ) -> Dict[str, Any]:
         """
         Cancel a Stripe subscription.
+
+        Args:
+            subscription_id: The Stripe subscription ID
+            stripe_account: Optional connected account ID for Stripe Connect subscriptions
         """
         try:
+            modify_params = {"cancel_at_period_end": True}
+            if stripe_account:
+                modify_params["stripe_account"] = stripe_account
+
             subscription = stripe.Subscription.modify(
                 subscription_id,
-                cancel_at_period_end=True
+                **modify_params
             )
-            
-            logger.info(f"Cancelled subscription {subscription_id}")
+
+            logger.info(f"Cancelled subscription {subscription_id}" + (f" on account {stripe_account}" if stripe_account else ""))
             return subscription
-            
+
         except stripe.StripeError as e:
             logger.error(f"Stripe error cancelling subscription: {str(e)}")
             raise Exception(f"Failed to cancel subscription: {str(e)}")
@@ -782,15 +794,27 @@ class StripeConnectService:
             logger.error(f"Error creating checkout session: {str(e)}")
             raise
     
-    async def get_subscription(self, subscription_id: str) -> Dict[str, Any]:
+    async def get_subscription(
+        self,
+        subscription_id: str,
+        stripe_account: str = None
+    ) -> Dict[str, Any]:
         """
         Get Stripe subscription details.
+
+        Args:
+            subscription_id: The Stripe subscription ID
+            stripe_account: Optional connected account ID for Stripe Connect subscriptions
         """
         try:
-            subscription = stripe.Subscription.retrieve(subscription_id)
-            logger.info(f"Retrieved subscription {subscription_id}")
+            retrieve_params = {}
+            if stripe_account:
+                retrieve_params["stripe_account"] = stripe_account
+
+            subscription = stripe.Subscription.retrieve(subscription_id, **retrieve_params)
+            logger.info(f"Retrieved subscription {subscription_id}" + (f" from account {stripe_account}" if stripe_account else ""))
             return subscription
-            
+
         except stripe.StripeError as e:
             logger.error(f"Stripe error retrieving subscription: {str(e)}")
             raise Exception(f"Failed to retrieve subscription: {str(e)}")
@@ -798,19 +822,31 @@ class StripeConnectService:
             logger.error(f"Error retrieving subscription: {str(e)}")
             raise
     
-    async def reactivate_subscription(self, subscription_id: str) -> Dict[str, Any]:
+    async def reactivate_subscription(
+        self,
+        subscription_id: str,
+        stripe_account: str = None
+    ) -> Dict[str, Any]:
         """
         Reactivate a cancelled subscription.
+
+        Args:
+            subscription_id: The Stripe subscription ID
+            stripe_account: Optional connected account ID for Stripe Connect subscriptions
         """
         try:
+            modify_params = {"cancel_at_period_end": False}
+            if stripe_account:
+                modify_params["stripe_account"] = stripe_account
+
             subscription = stripe.Subscription.modify(
                 subscription_id,
-                cancel_at_period_end=False
+                **modify_params
             )
-            
-            logger.info(f"Reactivated subscription {subscription_id}")
+
+            logger.info(f"Reactivated subscription {subscription_id}" + (f" on account {stripe_account}" if stripe_account else ""))
             return subscription
-            
+
         except stripe.StripeError as e:
             logger.error(f"Stripe error reactivating subscription: {str(e)}")
             raise Exception(f"Failed to reactivate subscription: {str(e)}")

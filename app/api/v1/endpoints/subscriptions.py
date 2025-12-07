@@ -1352,6 +1352,11 @@ async def get_user_strategy_subscriptions(
                 # Get creator info
                 creator = db.query(User).filter(User.id == monetization.creator_user_id).first()
 
+                # Get creator's Stripe Connect account ID for API calls
+                stripe_account_id = None
+                if creator and creator.creator_profile:
+                    stripe_account_id = creator.creator_profile.stripe_connect_account_id
+
                 # Initialize subscription info with database data
                 subscription_info = {
                     "id": str(purchase.id),
@@ -1372,10 +1377,11 @@ async def get_user_strategy_subscriptions(
                 }
 
                 # Try to get Stripe subscription details if subscription ID exists
-                if purchase.stripe_subscription_id:
+                if purchase.stripe_subscription_id and stripe_account_id:
                     try:
                         subscription_data = await stripe_service.get_subscription(
-                            purchase.stripe_subscription_id
+                            purchase.stripe_subscription_id,
+                            stripe_account=stripe_account_id
                         )
 
                         # Update with Stripe data if available
@@ -1388,7 +1394,7 @@ async def get_user_strategy_subscriptions(
                             "trial_end": subscription_data.get("trial_end"),
                             "cancel_at_period_end": subscription_data.get("cancel_at_period_end", False),
                         })
-                        logger.info(f"Successfully fetched Stripe data for subscription {purchase.stripe_subscription_id}")
+                        logger.info(f"Successfully fetched Stripe data for subscription {purchase.stripe_subscription_id} from account {stripe_account_id}")
                     except Exception as stripe_error:
                         # Log Stripe error but continue with database data
                         logger.warning(f"Could not fetch Stripe data for subscription {purchase.stripe_subscription_id}: {str(stripe_error)}")
@@ -1419,38 +1425,70 @@ async def cancel_strategy_subscription(
     """
     try:
         from app.models.strategy_purchase import StrategyPurchase
+        from app.models.strategy_monetization import StrategyMonetization
         from app.services.stripe_connect_service import StripeConnectService
-        
+
         # Verify ownership
         purchase = db.query(StrategyPurchase).filter(
             StrategyPurchase.id == subscription_id,
             StrategyPurchase.user_id == current_user.id,
             StrategyPurchase.stripe_subscription_id.isnot(None)
         ).first()
-        
+
         if not purchase:
             raise HTTPException(
                 status_code=404,
                 detail="Strategy subscription not found"
             )
-        
-        # Cancel the Stripe subscription
+
+        # Get the creator's Stripe Connect account ID
+        # Subscription was created on the creator's connected account, so we need to cancel it there
+        monetization = db.query(StrategyMonetization).filter(
+            StrategyMonetization.webhook_id == purchase.webhook_id
+        ).first()
+
+        if not monetization:
+            raise HTTPException(
+                status_code=404,
+                detail="Strategy monetization data not found"
+            )
+
+        creator = db.query(User).filter(User.id == monetization.creator_user_id).first()
+
+        if not creator or not creator.creator_profile:
+            raise HTTPException(
+                status_code=404,
+                detail="Creator profile not found"
+            )
+
+        stripe_account_id = creator.creator_profile.stripe_connect_account_id
+
+        if not stripe_account_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Creator's Stripe account not configured"
+            )
+
+        # Cancel the Stripe subscription on the creator's connected account
         stripe_service = StripeConnectService()
-        result = await stripe_service.cancel_subscription(purchase.stripe_subscription_id)
-        
+        result = await stripe_service.cancel_subscription(
+            purchase.stripe_subscription_id,
+            stripe_account=stripe_account_id
+        )
+
         # Update purchase status
         purchase.status = "cancelled"
         db.commit()
-        
-        logger.info(f"Cancelled strategy subscription {subscription_id} for user {current_user.id}")
-        
+
+        logger.info(f"Cancelled strategy subscription {subscription_id} for user {current_user.id} on connected account {stripe_account_id}")
+
         return {
             "status": "success",
             "message": "Strategy subscription cancelled successfully",
             "cancel_at_period_end": result.get("cancel_at_period_end"),
             "current_period_end": result.get("current_period_end")
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
