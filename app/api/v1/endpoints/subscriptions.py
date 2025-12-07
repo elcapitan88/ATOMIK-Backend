@@ -1417,6 +1417,7 @@ async def get_user_strategy_subscriptions(
 @router.post("/strategy-subscriptions/{subscription_id}/cancel")
 async def cancel_strategy_subscription(
     subscription_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -1424,9 +1425,11 @@ async def cancel_strategy_subscription(
     Cancel a user's strategy subscription.
     """
     try:
+        from datetime import datetime
         from app.models.strategy_purchase import StrategyPurchase
         from app.models.strategy_monetization import StrategyMonetization
         from app.services.stripe_connect_service import StripeConnectService
+        from app.services.email.email_notification import send_strategy_subscription_cancellation_email
 
         # Verify ownership
         purchase = db.query(StrategyPurchase).filter(
@@ -1440,6 +1443,10 @@ async def cancel_strategy_subscription(
                 status_code=404,
                 detail="Strategy subscription not found"
             )
+
+        # Get the webhook to get strategy name
+        webhook = db.query(Webhook).filter(Webhook.id == purchase.webhook_id).first()
+        strategy_name = webhook.name if webhook else "Unknown Strategy"
 
         # Get the creator's Stripe Connect account ID
         # Subscription was created on the creator's connected account, so we need to cancel it there
@@ -1461,6 +1468,7 @@ async def cancel_strategy_subscription(
                 detail="Creator profile not found"
             )
 
+        creator_name = creator.username if creator else "Unknown Creator"
         stripe_account_id = creator.creator_profile.stripe_connect_account_id
 
         if not stripe_account_id:
@@ -1481,6 +1489,25 @@ async def cancel_strategy_subscription(
         db.commit()
 
         logger.info(f"Cancelled strategy subscription {subscription_id} for user {current_user.id} on connected account {stripe_account_id}")
+
+        # Format access end date from Stripe's current_period_end (Unix timestamp)
+        access_end_date = None
+        current_period_end = result.get("current_period_end")
+        if current_period_end:
+            try:
+                access_end_date = datetime.fromtimestamp(current_period_end).strftime("%B %d, %Y")
+            except (ValueError, TypeError):
+                access_end_date = None
+
+        # Send cancellation confirmation email
+        await send_strategy_subscription_cancellation_email(
+            background_tasks=background_tasks,
+            user_email=current_user.email,
+            user_name=current_user.username or current_user.email.split("@")[0],
+            strategy_name=strategy_name,
+            creator_name=creator_name,
+            access_end_date=access_end_date
+        )
 
         return {
             "status": "success",

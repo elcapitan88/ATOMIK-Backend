@@ -244,3 +244,42 @@ async def send_admin_signup_notification(
     )
     
     logger.info(f"Added admin notification email task for new signup: {username}")
+
+
+async def send_strategy_subscription_cancellation_email(
+    background_tasks: BackgroundTasks,
+    user_email: str,
+    user_name: str,
+    strategy_name: str,
+    creator_name: str,
+    access_end_date: str = None
+) -> None:
+    """
+    Send strategy subscription cancellation confirmation email asynchronously.
+
+    Args:
+        background_tasks: FastAPI BackgroundTasks
+        user_email: User's email address
+        user_name: User's name or username
+        strategy_name: Name of the cancelled strategy
+        creator_name: Name of the strategy creator
+        access_end_date: Date when access will end (formatted string)
+    """
+    context = {
+        "user_name": user_name,
+        "strategy_name": strategy_name,
+        "creator_name": creator_name,
+        "access_end_date": access_end_date,
+        "support_email": "support@atomiktrading.io",
+        "company_name": "Atomik Trading"
+    }
+
+    background_tasks.add_task(
+        send_email,
+        to=user_email,
+        subject=f"Strategy Subscription Cancelled - {strategy_name}",
+        template="strategy_subscription_cancellation",
+        context=context
+    )
+
+    logger.info(f"Added strategy cancellation email task for user {user_name} ({user_email}) - Strategy: {strategy_name}")

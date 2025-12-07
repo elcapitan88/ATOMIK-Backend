@@ -1,0 +1,212 @@
+<!-- templates/emails/strategy_subscription_cancellation.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategy Subscription Cancelled</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #ffffff;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+            background-color: #00C6E0;
+            color: #ffffff;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+        .confirmation-box {
+            background-color: #e3f2fd;
+            border: 2px solid #00C6E0;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .confirmation-box .icon {
+            font-size: 48px;
+            margin: 0;
+        }
+        .confirmation-box h2 {
+            color: #0277bd;
+            margin: 15px 0 10px 0;
+            font-size: 24px;
+        }
+        .confirmation-box p {
+            margin: 0;
+            color: #01579b;
+            font-size: 16px;
+        }
+        .content {
+            padding: 20px 0;
+        }
+        .content p {
+            margin: 15px 0;
+            font-size: 16px;
+        }
+        .button {
+            display: inline-block;
+            padding: 14px 30px;
+            background-color: #00C6E0;
+            color: #ffffff !important;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 16px;
+            margin: 20px 0;
+        }
+        .button:hover {
+            background-color: #00ACC1;
+            text-decoration: none;
+        }
+        .details-box {
+            background-color: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .details-box h3 {
+            color: #333333;
+            margin-top: 0;
+        }
+        .details-box ul {
+            margin: 10px 0;
+            padding-left: 0;
+            list-style: none;
+        }
+        .details-box li {
+            margin: 12px 0;
+            color: #666666;
+            padding-left: 25px;
+            position: relative;
+        }
+        .details-box li:before {
+            content: "•";
+            color: #00C6E0;
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+        }
+        .info-box {
+            background-color: #fff8e1;
+            border: 1px solid #ffecb3;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .info-box h3 {
+            color: #f57f17;
+            margin-top: 0;
+            font-size: 16px;
+        }
+        .info-box p {
+            margin: 0;
+            font-size: 14px;
+            color: #666666;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            font-size: 14px;
+            color: #777777;
+        }
+        .footer a {
+            color: #00C6E0;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        .center {
+            text-align: center;
+        }
+        .highlight {
+            color: #00C6E0;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Subscription Cancelled</h1>
+        </div>
+
+        <div class="confirmation-box">
+            <p class="icon">📋</p>
+            <h2>Cancellation Confirmed</h2>
+            <p>Your strategy subscription has been cancelled</p>
+        </div>
+
+        <div class="content">
+            <p>Hi {{ user_name }},</p>
+
+            <p>We've received your request to cancel your subscription to <span class="highlight">{{ strategy_name }}</span>. Your cancellation has been processed successfully.</p>
+
+            <div class="details-box">
+                <h3>📄 Cancellation Details</h3>
+                <ul>
+                    <li><strong>Strategy:</strong> {{ strategy_name }}</li>
+                    <li><strong>Creator:</strong> {{ creator_name }}</li>
+                    {% if access_end_date %}
+                    <li><strong>Access Until:</strong> {{ access_end_date }}</li>
+                    {% endif %}
+                    <li><strong>Future Charges:</strong> No further charges will be made</li>
+                </ul>
+            </div>
+
+            {% if access_end_date %}
+            <div class="info-box">
+                <h3>📅 Important Note</h3>
+                <p>You will continue to have access to this strategy until <strong>{{ access_end_date }}</strong>. After this date, the strategy will no longer execute trades on your behalf.</p>
+            </div>
+            {% endif %}
+
+            <p><strong>Changed your mind?</strong></p>
+            <p>You can resubscribe to this strategy anytime from the marketplace. We'd love to have you back!</p>
+
+            <div class="center">
+                <a href="https://atomiktrading.io/marketplace" class="button">Browse Marketplace</a>
+            </div>
+
+            <p>If you have any questions or feedback about your experience, we'd love to hear from you. Please reach out to us at <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+
+            <p>Thank you for being part of the Atomik community!</p>
+
+            <p>Best regards,<br>
+            The {{ company_name }} Team</p>
+        </div>
+
+        <div class="footer">
+            <p>&copy; 2025 {{ company_name }}. All rights reserved.</p>
+            <p>
+                <a href="https://atomiktrading.io">Website</a> |
+                <a href="mailto:{{ support_email }}">Support</a> |
+                <a href="https://atomiktrading.io/privacy">Privacy Policy</a>
+            </p>
+            <p style="font-size: 12px; color: #999999;">
+                You received this email because you cancelled a strategy subscription with {{ company_name }}.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
