@@ -172,6 +172,7 @@ class MarketDataService:
                 "bars": bars,
                 "interval": interval
             }
+            # Add API key if configured (Data Hub expects query parameter)
             if self._data_hub_api_key:
                 params["api_key"] = self._data_hub_api_key
 

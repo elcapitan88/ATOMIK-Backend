@@ -237,6 +237,7 @@ class Settings(BaseSettings):
     # ARIA Integration Settings
     ANTHROPIC_API_KEY: str = ""
     ATOMIK_DATA_HUB_URL: str = "http://localhost:8000"  # Default for local dev
+    ATOMIK_DATA_HUB_API_KEY: Optional[str] = None  # API key for Data Hub authentication
     ARIA_CACHE_TTL: int = 60  # Cache timeout in seconds
     ARIA_MAX_TOKENS: int = 500  # Default max tokens for responses
 
