@@ -1,29 +1,91 @@
 # app/services/market_data_service.py
 """
-TEMPORARY Market Data Service for ARIA using yfinance
+Market Data Service for ARIA
 
-This is a temporary implementation to enable ARIA market data queries.
-It should be migrated to atomik-data-hub once the Data Hub's data sources
-(Databento, Polygon) are properly configured.
+Provides market data for ARIA queries:
+- Stocks/ETFs: Uses yfinance (temporary, will migrate to Polygon via Data Hub)
+- Futures: Uses atomik-data-hub which fetches from Databento
 
-TODO: Migration plan:
-1. Configure Polygon API key in atomik-data-hub for stocks
-2. Configure Databento for futures data
-3. Update ARIA to call Data Hub endpoints instead of this service
-4. Remove this file and yfinance dependency
+Data Sources:
+- Stocks (AAPL, TSLA, SPY, etc.): yfinance → Yahoo Finance
+- Futures (MNQ, ES, NQ, etc.): Data Hub → Databento
 
 Created: 2024-11-25
+Updated: 2025-12-09 - Added futures support via Databento/Data Hub
 Author: Claude Code
-Purpose: Enable ARIA to answer market data questions (price, range, etc.)
 """
 
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from functools import lru_cache
 import asyncio
+import httpx
+
+from ..core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Futures Symbol Configuration
+# =============================================================================
+
+# Futures symbols supported via Databento (through atomik-data-hub)
+FUTURES_SYMBOLS = {
+    # E-mini contracts
+    'ES',   # E-mini S&P 500
+    'NQ',   # E-mini Nasdaq-100
+    'RTY',  # E-mini Russell 2000
+    'YM',   # E-mini Dow Jones
+
+    # Micro contracts
+    'MES',  # Micro E-mini S&P 500
+    'MNQ',  # Micro E-mini Nasdaq-100
+    'M2K',  # Micro E-mini Russell 2000
+    'MYM',  # Micro E-mini Dow Jones
+
+    # Commodities
+    'CL',   # Crude Oil
+    'GC',   # Gold
+    'SI',   # Silver
+    'NG',   # Natural Gas
+
+    # Micro commodities
+    'MCL',  # Micro Crude Oil
+    'MGC',  # Micro Gold
+
+    # Treasury futures
+    'ZB',   # 30-Year Treasury Bond
+    'ZN',   # 10-Year Treasury Note
+    'ZF',   # 5-Year Treasury Note
+    'ZT',   # 2-Year Treasury Note
+
+    # Bitcoin futures
+    'MBT',  # Micro Bitcoin (CME)
+}
+
+# Human-readable names for futures
+FUTURES_NAMES = {
+    'ES': 'E-mini S&P 500',
+    'NQ': 'E-mini Nasdaq-100',
+    'RTY': 'E-mini Russell 2000',
+    'YM': 'E-mini Dow Jones',
+    'MES': 'Micro E-mini S&P 500',
+    'MNQ': 'Micro E-mini Nasdaq-100',
+    'M2K': 'Micro E-mini Russell 2000',
+    'MYM': 'Micro E-mini Dow Jones',
+    'CL': 'Crude Oil',
+    'GC': 'Gold',
+    'SI': 'Silver',
+    'NG': 'Natural Gas',
+    'MCL': 'Micro Crude Oil',
+    'MGC': 'Micro Gold',
+    'ZB': '30-Year Treasury Bond',
+    'ZN': '10-Year Treasury Note',
+    'ZF': '5-Year Treasury Note',
+    'ZT': '2-Year Treasury Note',
+    'MBT': 'Micro Bitcoin',
+}
 
 # Lazy import yfinance to avoid startup issues if not installed
 _yf = None
@@ -44,40 +106,385 @@ def _get_yfinance():
 
 class MarketDataService:
     """
-    TEMPORARY: Simple market data service using yfinance
+    Market data service for ARIA queries.
+
+    Routes requests to appropriate data sources:
+    - Stocks/ETFs: yfinance (temporary)
+    - Futures: atomik-data-hub → Databento
 
     Provides:
     - Real-time quotes (price, change, volume)
     - Historical data (OHLCV)
-    - Basic company info
-
-    Note: This is meant for ARIA testing only. For production, use atomik-data-hub.
+    - Basic company info (stocks only)
     """
 
     def __init__(self):
         """Initialize the market data service"""
         self._cache = {}  # Simple in-memory cache
         self._cache_ttl = 60  # Cache for 60 seconds
-        logger.info("MarketDataService initialized (TEMPORARY - using yfinance)")
+        self._data_hub_url = getattr(settings, 'ATOMIK_DATA_HUB_URL', 'http://localhost:8000')
+        self._data_hub_api_key = getattr(settings, 'ATOMIK_DATA_HUB_API_KEY', None)
+        self._http_client: Optional[httpx.AsyncClient] = None
+        logger.info(f"MarketDataService initialized (stocks: yfinance, futures: Data Hub at {self._data_hub_url})")
+
+    def is_futures_symbol(self, symbol: str) -> bool:
+        """Check if symbol is a futures contract."""
+        return symbol.upper() in FUTURES_SYMBOLS
+
+    def get_futures_name(self, symbol: str) -> str:
+        """Get human-readable name for a futures symbol."""
+        return FUTURES_NAMES.get(symbol.upper(), symbol.upper())
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """Get or create HTTP client for Data Hub requests."""
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=5.0),
+                headers={"Content-Type": "application/json"}
+            )
+        return self._http_client
+
+    # =========================================================================
+    # Futures Data Methods (via Data Hub → Databento)
+    # =========================================================================
+
+    async def _get_futures_historical(
+        self,
+        symbol: str,
+        bars: int = 300,
+        interval: str = "1d"
+    ) -> Dict[str, Any]:
+        """
+        Fetch historical futures data from Data Hub (Databento).
+
+        Args:
+            symbol: Futures symbol (e.g., MNQ, ES, NQ)
+            bars: Number of bars to fetch
+            interval: Bar interval (1m, 5m, 15m, 1h, 1d)
+
+        Returns:
+            Historical OHLCV data from Databento
+        """
+        try:
+            client = await self._get_http_client()
+
+            params = {
+                "bars": bars,
+                "interval": interval
+            }
+            if self._data_hub_api_key:
+                params["api_key"] = self._data_hub_api_key
+
+            url = f"{self._data_hub_url}/api/v1/historical/{symbol.upper()}"
+            logger.info(f"Fetching futures data from Data Hub: {url}")
+
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(f"Successfully fetched {len(data.get('bars', []))} bars for {symbol} from Data Hub")
+
+            return data
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching futures data for {symbol}: {e.response.status_code} - {e.response.text}")
+            return {
+                "success": False,
+                "error": f"Data Hub error: {e.response.status_code}",
+                "data": None
+            }
+        except Exception as e:
+            logger.error(f"Error fetching futures data for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    async def _get_futures_quote(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get current quote for a futures symbol by fetching recent historical data.
+
+        Args:
+            symbol: Futures symbol (e.g., MNQ, ES)
+
+        Returns:
+            Quote data derived from most recent bar
+        """
+        try:
+            # Fetch recent 1-minute bars to get current price
+            data = await self._get_futures_historical(symbol, bars=5, interval="1m")
+
+            if not data.get("success", True) or not data.get("bars"):
+                # Try daily bars as fallback
+                data = await self._get_futures_historical(symbol, bars=2, interval="1d")
+
+            if not data.get("bars"):
+                return {
+                    "success": False,
+                    "error": f"No data available for futures symbol {symbol}",
+                    "data": None
+                }
+
+            bars = data["bars"]
+            latest_bar = bars[-1] if bars else None
+            prev_bar = bars[-2] if len(bars) > 1 else None
+
+            if not latest_bar:
+                return {
+                    "success": False,
+                    "error": f"No recent data for {symbol}",
+                    "data": None
+                }
+
+            # Calculate change from previous bar
+            current_price = latest_bar.get("close", 0)
+            prev_close = prev_bar.get("close", current_price) if prev_bar else current_price
+            change = current_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+
+            result = {
+                "symbol": symbol.upper(),
+                "name": self.get_futures_name(symbol),
+                "price": round(current_price, 2),
+                "change": round(change, 2),
+                "change_percent": round(change_pct, 2),
+                "volume": latest_bar.get("volume", 0),
+                "day_high": round(latest_bar.get("high", 0), 2),
+                "day_low": round(latest_bar.get("low", 0), 2),
+                "open": round(latest_bar.get("open", 0), 2),
+                "previous_close": round(prev_close, 2),
+                "timestamp": latest_bar.get("timestamp", datetime.utcnow().isoformat()),
+                "source": "databento",
+                "asset_type": "futures"
+            }
+
+            # Cache the result
+            cache_key = f"quote_{symbol}"
+            self._set_cached(cache_key, result)
+
+            return {
+                "success": True,
+                "data": result
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching futures quote for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    async def _get_futures_historical_summary(
+        self,
+        symbol: str,
+        period: str = "1wk"
+    ) -> Dict[str, Any]:
+        """
+        Get historical summary for futures (high, low, range, etc.)
+
+        Args:
+            symbol: Futures symbol
+            period: Time period - 1d, 5d, 1wk, 1mo, 3mo
+
+        Returns:
+            Historical summary stats
+        """
+        try:
+            # Map period to number of bars (daily)
+            period_bars = {
+                "1d": 1,
+                "5d": 5,
+                "1wk": 7,
+                "1mo": 30,
+                "3mo": 90
+            }
+            bars = period_bars.get(period, 7)
+
+            data = await self._get_futures_historical(symbol, bars=bars, interval="1d")
+
+            if not data.get("bars"):
+                return {
+                    "success": False,
+                    "error": f"No historical data for futures symbol {symbol}",
+                    "data": None
+                }
+
+            bars_data = data["bars"]
+
+            # Calculate summary stats
+            highs = [b.get("high", 0) for b in bars_data]
+            lows = [b.get("low", 0) for b in bars_data]
+            volumes = [b.get("volume", 0) for b in bars_data]
+
+            high = max(highs) if highs else 0
+            low = min(lows) if lows else 0
+            range_val = high - low
+            avg_volume = sum(volumes) / len(volumes) if volumes else 0
+
+            first_bar = bars_data[0] if bars_data else {}
+            last_bar = bars_data[-1] if bars_data else {}
+
+            first_close = first_bar.get("close", 0)
+            last_close = last_bar.get("close", 0)
+            period_change = last_close - first_close
+            period_change_pct = (period_change / first_close * 100) if first_close else 0
+
+            result = {
+                "symbol": symbol.upper(),
+                "name": self.get_futures_name(symbol),
+                "period": period,
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "range": round(range_val, 2),
+                "open": round(first_bar.get("open", 0), 2),
+                "close": round(last_close, 2),
+                "period_change": round(period_change, 2),
+                "period_change_percent": round(period_change_pct, 2),
+                "avg_volume": int(avg_volume),
+                "data_points": len(bars_data),
+                "start_date": first_bar.get("timestamp", "")[:10] if first_bar.get("timestamp") else "",
+                "end_date": last_bar.get("timestamp", "")[:10] if last_bar.get("timestamp") else "",
+                "timestamp": datetime.utcnow().isoformat(),
+                "source": "databento",
+                "asset_type": "futures"
+            }
+
+            # Cache the result
+            cache_key = f"hist_{symbol}_{period}"
+            self._set_cached(cache_key, result, ttl=300)
+
+            return {
+                "success": True,
+                "data": result
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching futures historical for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    async def _get_futures_specific_day(
+        self,
+        symbol: str,
+        target_date: date
+    ) -> Dict[str, Any]:
+        """
+        Get futures data for a specific date.
+
+        Args:
+            symbol: Futures symbol
+            target_date: The specific date to fetch
+
+        Returns:
+            OHLCV data for that date
+        """
+        try:
+            # Fetch enough bars to include the target date
+            days_ago = (date.today() - target_date).days + 5
+            data = await self._get_futures_historical(symbol, bars=days_ago, interval="1d")
+
+            if not data.get("bars"):
+                return {
+                    "success": False,
+                    "error": f"No data available for {symbol}",
+                    "data": None
+                }
+
+            # Find the bar closest to target date
+            target_str = target_date.isoformat()
+            closest_bar = None
+            min_diff = float('inf')
+
+            for bar in data["bars"]:
+                bar_date_str = bar.get("timestamp", "")[:10]
+                if bar_date_str:
+                    try:
+                        bar_date = date.fromisoformat(bar_date_str)
+                        diff = abs((bar_date - target_date).days)
+                        if diff < min_diff:
+                            min_diff = diff
+                            closest_bar = bar
+                            if diff == 0:
+                                break  # Exact match
+                    except ValueError:
+                        continue
+
+            if not closest_bar:
+                return {
+                    "success": False,
+                    "error": f"No data found for {symbol} near {target_date}",
+                    "data": None
+                }
+
+            actual_date = closest_bar.get("timestamp", "")[:10]
+
+            result = {
+                "symbol": symbol.upper(),
+                "name": self.get_futures_name(symbol),
+                "requested_date": target_str,
+                "actual_date": actual_date,
+                "open": round(closest_bar.get("open", 0), 2),
+                "high": round(closest_bar.get("high", 0), 2),
+                "low": round(closest_bar.get("low", 0), 2),
+                "close": round(closest_bar.get("close", 0), 2),
+                "volume": closest_bar.get("volume", 0),
+                "timestamp": datetime.utcnow().isoformat(),
+                "source": "databento",
+                "asset_type": "futures",
+                "note": f"Data for {actual_date}" + (
+                    f" (closest to requested {target_str})" if actual_date != target_str else ""
+                )
+            }
+
+            return {
+                "success": True,
+                "data": result
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching specific day futures data for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None
+            }
+
+    # =========================================================================
+    # Public API Methods (route to appropriate data source)
+    # =========================================================================
 
     async def get_quote(self, symbol: str) -> Dict[str, Any]:
         """
-        Get real-time quote for a symbol
+        Get real-time quote for a symbol.
+
+        Routes to appropriate data source:
+        - Futures (MNQ, ES, NQ, etc.): Data Hub → Databento
+        - Stocks/ETFs: yfinance
 
         Args:
-            symbol: Stock/ETF symbol (e.g., AAPL, TSLA, SPY)
+            symbol: Symbol (e.g., AAPL, TSLA, SPY, MNQ, ES)
 
         Returns:
             Dict with price, change, volume, high, low, etc.
         """
         try:
-            # Check cache first
+            # Route futures to Data Hub (Databento)
+            if self.is_futures_symbol(symbol):
+                logger.info(f"Routing {symbol} to Data Hub (futures)")
+                return await self._get_futures_quote(symbol)
+
+            # Check cache first for stocks
             cache_key = f"quote_{symbol}"
             cached = self._get_cached(cache_key)
             if cached:
                 return cached
 
-            # Fetch from yfinance (run in thread pool to not block)
+            # Fetch stocks from yfinance (run in thread pool to not block)
             yf = _get_yfinance()
 
             def fetch_quote():
@@ -132,17 +539,26 @@ class MarketDataService:
         period: str = "1wk"
     ) -> Dict[str, Any]:
         """
-        Get historical data for a symbol
+        Get historical data for a symbol.
+
+        Routes to appropriate data source:
+        - Futures (MNQ, ES, NQ, etc.): Data Hub → Databento
+        - Stocks/ETFs: yfinance
 
         Args:
-            symbol: Stock/ETF symbol
+            symbol: Symbol (e.g., AAPL, TSLA, SPY, MNQ, ES)
             period: Time period - 1d, 5d, 1wk, 1mo, 3mo, 6mo, 1y
 
         Returns:
             Dict with OHLCV data and summary stats
         """
         try:
-            # Check cache
+            # Route futures to Data Hub (Databento)
+            if self.is_futures_symbol(symbol):
+                logger.info(f"Routing historical {symbol} to Data Hub (futures)")
+                return await self._get_futures_historical_summary(symbol, period)
+
+            # Check cache for stocks
             cache_key = f"hist_{symbol}_{period}"
             cached = self._get_cached(cache_key)
             if cached:
@@ -222,8 +638,12 @@ class MarketDataService:
         """
         Get OHLC data for a specific day of the week.
 
+        Routes to appropriate data source:
+        - Futures (MNQ, ES, NQ, etc.): Data Hub → Databento
+        - Stocks/ETFs: yfinance
+
         Args:
-            symbol: Stock/ETF symbol
+            symbol: Symbol (e.g., AAPL, TSLA, SPY, MNQ, ES)
             day_name: Day of week (monday, tuesday, etc.)
             modifier: 'last' or 'this' (defaults to 'last')
 
@@ -234,31 +654,37 @@ class MarketDataService:
             from datetime import date
             import calendar
 
+            # Calculate target date first (same logic for both futures and stocks)
+            today = date.today()
+            today_weekday = today.weekday()
+
+            # Map day names to weekday numbers (0=Monday, 6=Sunday)
+            days_map = {
+                'monday': 0, 'tuesday': 1, 'wednesday': 2,
+                'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
+            }
+
+            target_weekday = days_map.get(day_name.lower(), 4)  # Default to Friday
+
+            # Calculate days to go back
+            if modifier == 'last':
+                days_back = (today_weekday - target_weekday) % 7
+                if days_back == 0:
+                    days_back = 7  # If today is the target day, go back a week
+            else:  # 'this' week
+                days_back = (today_weekday - target_weekday) % 7
+
+            target_date = today - timedelta(days=days_back)
+
+            # Route futures to Data Hub (Databento)
+            if self.is_futures_symbol(symbol):
+                logger.info(f"Routing specific day {symbol} to Data Hub (futures)")
+                return await self._get_futures_specific_day(symbol, target_date)
+
             yf = _get_yfinance()
 
             def fetch_specific_day():
-                today = date.today()
-                today_weekday = today.weekday()
-
-                # Map day names to weekday numbers (0=Monday, 6=Sunday)
-                days_map = {
-                    'monday': 0, 'tuesday': 1, 'wednesday': 2,
-                    'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
-                }
-
-                target_weekday = days_map.get(day_name.lower(), 4)  # Default to Friday
-
-                # Calculate days to go back
-                if modifier == 'last':
-                    # Go back to the most recent occurrence
-                    days_back = (today_weekday - target_weekday) % 7
-                    if days_back == 0:
-                        days_back = 7  # If today is the target day, go back a week
-                else:  # 'this' week
-                    days_back = (today_weekday - target_weekday) % 7
-
-                target_date = today - timedelta(days=days_back)
-
+                # target_date is already calculated above - use closure
                 # Fetch data for that specific day (need to get a range and filter)
                 # Get 2 weeks of data to ensure we have the target day
                 start_date = target_date - timedelta(days=3)
