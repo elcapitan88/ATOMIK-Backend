@@ -60,7 +60,7 @@ ARIA_TOOLS = [
                     },
                     "specific_day": {
                         "type": "string",
-                        "description": "Specific day like 'last_friday', 'last_monday' (optional, use for specific day queries)"
+                        "description": "Specific day like 'yesterday', 'today', 'last_friday', 'last_monday' (optional, use for specific day queries)"
                     }
                 },
                 "required": ["symbol"]
@@ -431,16 +431,18 @@ class ARIAToolExecutor:
     in a format the LLM can understand.
     """
 
-    def __init__(self, db: Session, user_id: int):
+    def __init__(self, db: Session, user_id: int, timezone: Optional[str] = None):
         """
         Initialize the tool executor.
 
         Args:
             db: Database session
             user_id: Current user's ID
+            timezone: User's timezone for time-aware calculations (e.g., "America/New_York")
         """
         self.db = db
         self.user_id = user_id
+        self.timezone = timezone
 
         # Lazy-load services to avoid circular imports
         self._market_service = None
@@ -603,7 +605,7 @@ class ARIAToolExecutor:
             day = parts[-1]
 
             result = await self.market_service.get_specific_day_data(
-                symbol, day, modifier
+                symbol, day, modifier, timezone=self.timezone
             )
         else:
             result = await self.market_service.get_historical(symbol, period)

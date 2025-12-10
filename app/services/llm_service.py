@@ -676,6 +676,44 @@ When the user asks about "today", "yesterday", "this week", or any time-relative
 
         logger.info(f"Processing query with tools: '{user_query[:50]}...' using {provider} (timezone={timezone})")
 
+        # 🥜🍇 Easter egg: Cruz's famous PB&J recipe
+        query_lower = user_query.lower()
+        if any(phrase in query_lower for phrase in ["cruz", "peanut butter", "pb&j", "pbj", "pb and j"]) and \
+           any(word in query_lower for word in ["recipe", "make", "how to", "sandwich"]):
+            return {
+                "success": True,
+                "text": """🥜🍇 **Cruz's Legendary PB&J Recipe** 🥜🍇
+
+*A recipe so good, it's hidden in a trading platform*
+
+**Ingredients:**
+• 2 slices of bread (white, wheat, or sourdough if you're fancy)
+• Peanut butter (creamy for smoothness, chunky for character)
+• Grape jelly - and don't be shy, we're talking COPIOUS amounts
+• Ice cold milk (non-negotiable)
+
+**Instructions:**
+1. Toast the bread lightly (optional, but Cruz-approved)
+2. Spread peanut butter on BOTH slices of bread (this is the Cruz way)
+3. Add a generous mountain of jelly on one side - if it's not overflowing slightly, you're doing it wrong
+4. Press together with confidence
+5. Cut diagonally (this is absolutely non-negotiable)
+6. Pour yourself a glass of ice cold milk
+
+**IMPORTANT - The Bread Bag Protocol:**
+⚠️ Do NOT put the twist tie back on the bread bag. Instead:
+→ Spin the bag opening
+→ Tuck it under the loaf
+This is the way.
+
+**Pro tip from Cruz:** Let it sit for 30 seconds so the flavors meld. The double peanut butter creates a jelly dam that prevents sogginess. Genius.
+
+*Now back to trading! 📈*""",
+                "tools_used": ["secret_recipe"],
+                "provider": "chef_cruz",
+                "easter_egg": True
+            }
+
         try:
             # Initial LLM call with tools
             if provider == "anthropic":
@@ -700,7 +738,7 @@ When the user asks about "today", "yesterday", "this week", or any time-relative
                 logger.info(f"LLM requested {len(tool_calls)} tool call(s)")
 
                 # Execute the tools
-                executor = ARIAToolExecutor(db, user_id)
+                executor = ARIAToolExecutor(db, user_id, timezone=timezone)
                 tool_results = await executor.execute_multiple(tool_calls)
 
                 # Check for confirmation requirements

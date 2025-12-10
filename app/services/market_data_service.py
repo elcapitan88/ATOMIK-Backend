@@ -634,7 +634,8 @@ class MarketDataService:
         self,
         symbol: str,
         day_name: str,
-        modifier: str = "last"
+        modifier: str = "last",
+        timezone: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get OHLC data for a specific day of the week.
@@ -645,8 +646,9 @@ class MarketDataService:
 
         Args:
             symbol: Symbol (e.g., AAPL, TSLA, SPY, MNQ, ES)
-            day_name: Day of week (monday, tuesday, etc.)
+            day_name: Day of week (monday, tuesday, etc.) OR 'yesterday', 'today'
             modifier: 'last' or 'this' (defaults to 'last')
+            timezone: User's timezone for calculating "today"/"yesterday" (e.g., "America/New_York")
 
         Returns:
             Dict with OHLC data for that specific day
@@ -655,27 +657,47 @@ class MarketDataService:
             from datetime import date
             import calendar
 
-            # Calculate target date first (same logic for both futures and stocks)
-            today = date.today()
+            # Calculate "today" based on user's timezone if provided
+            if timezone:
+                try:
+                    import pytz
+                    tz = pytz.timezone(timezone)
+                    today = datetime.now(tz).date()
+                    logger.info(f"Using user timezone {timezone}: today = {today}")
+                except Exception as e:
+                    logger.warning(f"Failed to use timezone {timezone}: {e}, falling back to server time")
+                    today = date.today()
+            else:
+                today = date.today()
+
             today_weekday = today.weekday()
 
-            # Map day names to weekday numbers (0=Monday, 6=Sunday)
-            days_map = {
-                'monday': 0, 'tuesday': 1, 'wednesday': 2,
-                'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
-            }
+            # Handle "yesterday" and "today" specially
+            day_name_lower = day_name.lower()
+            if day_name_lower == 'yesterday':
+                target_date = today - timedelta(days=1)
+                logger.info(f"Specific day 'yesterday' resolved to {target_date} (timezone={timezone})")
+            elif day_name_lower == 'today':
+                target_date = today
+                logger.info(f"Specific day 'today' resolved to {target_date} (timezone={timezone})")
+            else:
+                # Map day names to weekday numbers (0=Monday, 6=Sunday)
+                days_map = {
+                    'monday': 0, 'tuesday': 1, 'wednesday': 2,
+                    'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
+                }
 
-            target_weekday = days_map.get(day_name.lower(), 4)  # Default to Friday
+                target_weekday = days_map.get(day_name_lower, 4)  # Default to Friday
 
-            # Calculate days to go back
-            if modifier == 'last':
-                days_back = (today_weekday - target_weekday) % 7
-                if days_back == 0:
-                    days_back = 7  # If today is the target day, go back a week
-            else:  # 'this' week
-                days_back = (today_weekday - target_weekday) % 7
+                # Calculate days to go back
+                if modifier == 'last':
+                    days_back = (today_weekday - target_weekday) % 7
+                    if days_back == 0:
+                        days_back = 7  # If today is the target day, go back a week
+                else:  # 'this' week
+                    days_back = (today_weekday - target_weekday) % 7
 
-            target_date = today - timedelta(days=days_back)
+                target_date = today - timedelta(days=days_back)
 
             # Route futures to Data Hub (Databento)
             if self.is_futures_symbol(symbol):
