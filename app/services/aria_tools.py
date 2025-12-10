@@ -28,13 +28,13 @@ ARIA_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_stock_quote",
-            "description": "Get current price, change, volume, and day range for a stock or ETF. Use this when user asks about current price, how a stock is doing today, or wants real-time market data.",
+            "description": "Get current price, change, volume, and day range for stocks, ETFs, or futures contracts. Use this when user asks about current price or how an asset is doing today. Supports: stocks (AAPL, TSLA), ETFs (SPY, QQQ), and FUTURES (ES, NQ, MNQ, MES, RTY, YM, CL, GC, SI, ZB, ZN).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "symbol": {
                         "type": "string",
-                        "description": "Stock/ETF ticker symbol (e.g., AAPL, SPY, TSLA, QQQ)"
+                        "description": "Ticker symbol: stocks (AAPL), ETFs (SPY), or futures (ES, NQ, MNQ, MES, RTY, YM, CL, GC)"
                     }
                 },
                 "required": ["symbol"]
@@ -45,13 +45,13 @@ ARIA_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_historical_data",
-            "description": "Get historical OHLC data for a stock. Use for questions about past performance, weekly/monthly ranges, or specific dates like 'last Friday'.",
+            "description": "Get historical OHLC data for stocks, ETFs, or futures. Use for questions about past performance, weekly/monthly ranges, or specific dates like 'last Friday' or 'yesterday'. Supports FUTURES like ES, NQ, MNQ, MES, RTY, YM.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "symbol": {
                         "type": "string",
-                        "description": "Stock/ETF ticker symbol"
+                        "description": "Ticker symbol: stocks (AAPL), ETFs (SPY), or futures (ES, NQ, MNQ, MES, RTY, YM, CL, GC)"
                     },
                     "period": {
                         "type": "string",
