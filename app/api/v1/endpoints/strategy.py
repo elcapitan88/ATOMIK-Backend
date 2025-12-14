@@ -85,7 +85,6 @@ async def execute_strategy_manually(
 
 @router.post("/activate", response_model=StrategyResponse)
 @check_subscription
-@check_resource_limit("active_strategies")
 async def activate_strategy(
     *,
     db: Session = Depends(get_db),
@@ -102,6 +101,7 @@ async def activate_strategy(
         webhook = None
         strategy_code = None
         execution_type = 'webhook'
+        is_owner = False
         
         if strategy.webhook_id:
             # Webhook-based strategy validation
@@ -187,6 +187,26 @@ async def activate_strategy(
                 )
             
             execution_type = 'engine'
+
+        # Check resource limits based on ownership
+        resource_type = "active_strategies_owned" if is_owner else "active_strategies_subscribed"
+        subscription_service = SubscriptionService(db)
+        can_add, message = subscription_service.can_add_resource(
+            current_user.id, 
+            resource_type
+        )
+        
+        if not can_add and not settings.SKIP_SUBSCRIPTION_CHECK:
+            # Add upgrade headers if response object available
+            if response:
+                # Get user's subscription tier
+                user_tier = subscription_service.get_user_tier(current_user.id)
+                
+                # Map reason
+                reason = UpgradeReason.STRATEGY_LIMIT
+                add_upgrade_headers(response, user_tier, reason)
+            
+            raise HTTPException(status_code=403, detail=message)
 
         # Validate and convert ticker to display format
         valid, _ = validate_ticker(strategy.ticker)
@@ -757,6 +777,9 @@ async def toggle_strategy(
         strategy = db.query(ActivatedStrategy).filter(
             ActivatedStrategy.id == strategy_id,
             ActivatedStrategy.user_id == current_user.id
+        ).options(
+            joinedload(ActivatedStrategy.webhook),
+            joinedload(ActivatedStrategy.strategy_code)
         ).first()
         
         if not strategy:
@@ -764,11 +787,22 @@ async def toggle_strategy(
         
         # Check if trying to activate and if at limit
         if not strategy.is_active:
+            # Determine if owned or subscribed
+            is_owned = False
+            if strategy.execution_type == 'webhook' and strategy.webhook:
+                if strategy.webhook.user_id == current_user.id:
+                    is_owned = True
+            elif strategy.execution_type == 'engine' and strategy.strategy_code:
+                if strategy.strategy_code.user_id == current_user.id:
+                    is_owned = True
+            
+            limit_type = "active_strategies_owned" if is_owned else "active_strategies_subscribed"
+
             # Only check limits when activating (not when deactivating)
             subscription_service = SubscriptionService(db)
             can_add, message = subscription_service.can_add_resource(
                 current_user.id, 
-                "active_strategies"
+                limit_type
             )
             
             if not can_add and not settings.SKIP_SUBSCRIPTION_CHECK:

@@ -56,11 +56,9 @@ class SubscriptionService:
             subscription.active_strategies_count
         ]):
             # Use stored counters if available
-            return {
-                "connected_accounts": subscription.connected_accounts_count,
-                "active_webhooks": subscription.active_webhooks_count,
-                "active_strategies": subscription.active_strategies_count
-            }
+            # Note: We still need to calculate the split for strategies if not stored
+            # For now, we'll recalculate strategy split to ensure accuracy
+            pass
         
         # Fall back to counting from database if counters aren't available
         connected_accounts = self.db.query(func.count(BrokerAccount.id)).filter(
@@ -74,10 +72,38 @@ class SubscriptionService:
             Webhook.is_active == True
         ).scalar() or 0
         
-        active_strategies = self.db.query(func.count(ActivatedStrategy.id)).filter(
+        active_strategies_total = self.db.query(func.count(ActivatedStrategy.id)).filter(
             ActivatedStrategy.user_id == user_id,
             ActivatedStrategy.is_active == True
         ).scalar() or 0
+        
+        # Calculate split counts for Owned vs Subscribed strategies
+        # optimizing to avoid loading all objects if possible, but for now logic correctness is key
+        from sqlalchemy.orm import joinedload
+        strategies = self.db.query(ActivatedStrategy).filter(
+            ActivatedStrategy.user_id == user_id,
+            ActivatedStrategy.is_active == True
+        ).options(
+            joinedload(ActivatedStrategy.webhook),
+            joinedload(ActivatedStrategy.strategy_code)
+        ).all()
+        
+        active_strategies_owned = 0
+        active_strategies_subscribed = 0
+        
+        for s in strategies:
+            is_owned = False
+            if s.execution_type == 'webhook' and s.webhook:
+                if s.webhook.user_id == user_id:
+                    is_owned = True
+            elif s.execution_type == 'engine' and s.strategy_code:
+                if s.strategy_code.user_id == user_id:
+                    is_owned = True
+            
+            if is_owned:
+                active_strategies_owned += 1
+            else:
+                active_strategies_subscribed += 1
         
         # If subscription exists but counters aren't set, update them
         if subscription:
@@ -89,7 +115,9 @@ class SubscriptionService:
         return {
             "connected_accounts": connected_accounts,
             "active_webhooks": active_webhooks,
-            "active_strategies": active_strategies
+            "active_strategies": active_strategies_total,
+            "active_strategies_owned": active_strategies_owned,
+            "active_strategies_subscribed": active_strategies_subscribed
         }
     
     def can_add_resource(self, user_id: int, resource: str) -> Tuple[bool, str]:
@@ -130,6 +158,16 @@ class SubscriptionService:
             "active_webhooks": UpgradeReason.WEBHOOK_LIMIT,
             "active_strategies": UpgradeReason.STRATEGY_LIMIT,
         }
+        
+        # Handle new specific limits
+        if resource == "active_strategies_owned":
+            reason = UpgradeReason.STRATEGY_LIMIT
+            limit_desc = "active strategies (self-automated)"
+        elif resource == "active_strategies_subscribed":
+            reason = UpgradeReason.STRATEGY_LIMIT
+            limit_desc = "subscribed strategies"
+        else:
+            limit_desc = resource.replace("_", " ")
         
         reason = reason_mapping.get(resource, UpgradeReason.ADVANCED_FEATURES)
         message = get_upgrade_message(reason, tier)
@@ -186,7 +224,7 @@ class SubscriptionService:
                 "name": "Starter",  # New display name
                 "connected_accounts": get_tier_limit(SubscriptionTier.PRO, "connected_accounts"),
                 "active_webhooks": get_tier_limit(SubscriptionTier.PRO, "active_webhooks"),
-                "active_strategies": get_tier_limit(SubscriptionTier.PRO, "active_strategies"),
+                "active_strategies": f"{get_tier_limit(SubscriptionTier.PRO, 'active_strategies_owned')} Owned / Unlimited Subscribed",
                 "group_strategies": is_feature_allowed(SubscriptionTier.PRO, "group_strategies_allowed"),
                 "can_share_webhooks": is_feature_allowed(SubscriptionTier.PRO, "can_share_webhooks"),
                 "api_rate_limit": "500/min",
@@ -199,7 +237,7 @@ class SubscriptionService:
                 "name": "Pro",  # New display name
                 "connected_accounts": "Unlimited",
                 "active_webhooks": "Unlimited",
-                "active_strategies": "Unlimited",
+                "active_strategies": "Unlimited Owned / Unlimited Subscribed",
                 "group_strategies": is_feature_allowed(SubscriptionTier.ELITE, "group_strategies_allowed"),
                 "can_share_webhooks": is_feature_allowed(SubscriptionTier.ELITE, "can_share_webhooks"),
                 "api_rate_limit": "Unlimited",

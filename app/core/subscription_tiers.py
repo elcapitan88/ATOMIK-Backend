@@ -18,24 +18,27 @@ class SubscriptionTier(str, Enum):
 
 # Define resource limits for each tier
 TIER_LIMITS = {
-    SubscriptionTier.STARTER: {  # Legacy free tier (not sold anymore)
+    SubscriptionTier.STARTER: {  # Free Tier (Default)
         "connected_accounts": 1,
         "active_webhooks": 1,
-        "active_strategies": 1,
+        "active_strategies_owned": 0,      # Free users cannot automate own strategies
+        "active_strategies_subscribed": float('inf'), # Free users can subscribe to unlimited public strategies
         "group_strategies_allowed": False,
         "can_share_webhooks": False,
     },
-    SubscriptionTier.PRO: {  # "Starter" plan ($129/month) - DB value is "pro"
+    SubscriptionTier.PRO: {  # "Starter" plan ($49/month)
         "connected_accounts": 5,
         "active_webhooks": 5, 
-        "active_strategies": 5,
+        "active_strategies_owned": 5,     # Paid users get 5 own strategies
+        "active_strategies_subscribed": float('inf'), # Unlimited subscriptions
         "group_strategies_allowed": True,
         "can_share_webhooks": True,
     },
-    SubscriptionTier.ELITE: {  # "Pro" plan ($189/month) - DB value is "elite"
+    SubscriptionTier.ELITE: {  # "Pro" plan ($99/month)
         "connected_accounts": float('inf'),  # Unlimited
         "active_webhooks": float('inf'),     # Unlimited
-        "active_strategies": float('inf'),   # Unlimited
+        "active_strategies_owned": float('inf'),   # Unlimited own strategies
+        "active_strategies_subscribed": float('inf'), # Unlimited subscriptions
         "group_strategies_allowed": True,
         "can_share_webhooks": True,
     }
