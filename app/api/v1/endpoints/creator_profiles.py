@@ -28,7 +28,7 @@ async def get_creator_profile_by_username(
     """Get creator profile by username for public viewing."""
 
     # Find user by username
-    user = db.query(User).filter(User.username == username).first()
+    user = db.query(User).filter(func.lower(User.username) == func.lower(username)).first()
     if not user:
         raise HTTPException(status_code=404, detail="Creator not found")
 
