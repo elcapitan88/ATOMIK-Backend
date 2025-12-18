@@ -1,9 +1,18 @@
 # In app/models/user.py
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, JSON
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, JSON, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from ..db.base_class import Base
+
+# Phase 1.2: User mode enum for strict user type separation
+import enum
+
+class UserMode(str, enum.Enum):
+    SUBSCRIBER = "subscriber"
+    PRIVATE_CREATOR = "private_creator"
+    PUBLIC_CREATOR = "public_creator"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -17,6 +26,14 @@ class User(Base):
     app_role = Column(String, nullable=True)  # 'admin', 'moderator', 'beta_tester', None
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+    # Phase 1.2: User mode for strict type separation
+    user_mode = Column(
+        Enum(UserMode, name='user_mode_enum'),
+        default=UserMode.SUBSCRIBER,
+        nullable=False,
+        index=True
+    )
     
     # Profile fields
     profile_picture = Column(String, nullable=True)
@@ -84,3 +101,36 @@ class User(Base):
     def has_app_role(self, role: str) -> bool:
         """Check if user has a specific app role"""
         return self.app_role == role
+
+    # ==========================================================================
+    # Phase 1.2: User Mode Helper Methods
+    # ==========================================================================
+
+    def is_subscriber(self) -> bool:
+        """Check if user is in subscriber mode (cannot create strategies)"""
+        return self.user_mode == UserMode.SUBSCRIBER
+
+    def is_private_creator(self) -> bool:
+        """Check if user is a private creator (can create but not publish)"""
+        return self.user_mode == UserMode.PRIVATE_CREATOR
+
+    def is_public_creator(self) -> bool:
+        """Check if user is a public creator (can publish to marketplace)"""
+        return self.user_mode == UserMode.PUBLIC_CREATOR
+
+    def can_create_strategies(self) -> bool:
+        """Check if user can create strategies (any creator mode)"""
+        return self.user_mode in [UserMode.PRIVATE_CREATOR, UserMode.PUBLIC_CREATOR]
+
+    def can_publish_strategies(self) -> bool:
+        """Check if user can publish strategies to marketplace"""
+        return self.user_mode == UserMode.PUBLIC_CREATOR
+
+    def upgrade_to_private_creator(self):
+        """Upgrade user to private creator mode"""
+        if self.user_mode == UserMode.SUBSCRIBER:
+            self.user_mode = UserMode.PRIVATE_CREATOR
+
+    def upgrade_to_public_creator(self):
+        """Upgrade user to public creator mode"""
+        self.user_mode = UserMode.PUBLIC_CREATOR

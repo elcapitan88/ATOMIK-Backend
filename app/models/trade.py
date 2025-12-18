@@ -1,9 +1,17 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Numeric, Index
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Numeric, Index, Enum
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Dict, Any
+import enum
 from ..db.base_class import Base
+
+
+# Phase 1.3: Execution environment enum
+class ExecutionEnvironment(str, enum.Enum):
+    LIVE = "live"
+    PAPER = "paper"
+    BACKTEST = "backtest"
 
 
 class Trade(Base):
@@ -16,6 +24,9 @@ class Trade(Base):
     # User and Strategy Association
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     strategy_id = Column(Integer, ForeignKey("activated_strategies.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Phase 1.3: Strategy version tracking for per-version performance
+    strategy_version_id = Column(Integer, ForeignKey("strategy_codes.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Position Identification
     position_id = Column(String(50), nullable=False, unique=True, index=True)  # Unique constraint to prevent duplicates
@@ -52,15 +63,26 @@ class Trade(Base):
     broker_data = Column(Text, nullable=True)  # JSON string for broker-specific data
     notes = Column(Text, nullable=True)
     tags = Column(String(500), nullable=True)  # Comma-separated tags
-    
+
+    # Phase 1.3: Live verification tracking
+    execution_environment = Column(
+        Enum(ExecutionEnvironment, name='exec_env_enum'),
+        default=ExecutionEnvironment.LIVE,
+        nullable=False
+    )
+    is_verified_live = Column(Boolean, default=False, nullable=False, index=True)  # Set by system only
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
+
     # Relationships
     user = relationship("User", back_populates="trades")
     strategy = relationship("ActivatedStrategy", back_populates="trades")
     executions = relationship("TradeExecution", back_populates="trade", cascade="all, delete-orphan")
+
+    # Phase 1.3: Relationship to strategy version
+    strategy_version = relationship("StrategyCode", back_populates="version_trades", foreign_keys="Trade.strategy_version_id")
     
     # Indexes for performance
     __table_args__ = (
@@ -131,6 +153,41 @@ class Trade(Base):
     
     def __repr__(self):
         return f"<Trade(id={self.id}, symbol={self.symbol}, side={self.side}, status={self.status})>"
+
+    # ==========================================================================
+    # Phase 1.3: Live Verification Methods
+    # ==========================================================================
+
+    def verify_live_execution(self) -> bool:
+        """
+        Verify if this trade was executed live.
+        Sets is_verified_live based on broker confirmation data.
+        Called by system only, not user-editable.
+        """
+        import json
+
+        # Must have broker data
+        if not self.broker_data:
+            self.is_verified_live = False
+            return False
+
+        try:
+            data = json.loads(self.broker_data) if isinstance(self.broker_data, str) else self.broker_data
+        except (json.JSONDecodeError, TypeError):
+            self.is_verified_live = False
+            return False
+
+        # Check for broker confirmation indicators
+        has_fill_id = bool(data.get('fill_id') or data.get('execution_id') or data.get('order_id'))
+        has_broker_timestamp = bool(data.get('execution_time') or data.get('fill_time') or data.get('timestamp'))
+
+        # Trade is verified live if we have broker confirmation
+        self.is_verified_live = has_fill_id and has_broker_timestamp
+        return self.is_verified_live
+
+    def link_to_strategy_version(self, strategy_code_id: int):
+        """Link this trade to a specific strategy code version."""
+        self.strategy_version_id = strategy_code_id
 
 
 class TradeExecution(Base):

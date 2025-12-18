@@ -19,6 +19,10 @@ try:
     # Import working endpoints (excluding interactivebrokers which breaks)
     from .endpoints import creators, chat, feature_flags, marketplace, aria, affiliate, creator_profiles
     logger.info("Working endpoints imported successfully (including ARIA and affiliate)")
+
+    # Phase 1: Public verification endpoints (no auth required)
+    from .endpoints import public_verification
+    logger.info("Public verification endpoint imported successfully")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -123,6 +127,13 @@ try:
     logger.info("Interactive Brokers router registered")
 except Exception as e:
     logger.error(f"Error registering Interactive Brokers router: {e}")
+
+# Phase 1: Public Verification router (NO AUTH REQUIRED - trust artifacts)
+try:
+    api_router.include_router(public_verification.router, prefix="/public", tags=["public-verification"])
+    logger.info("Public verification router registered - accessible without authentication")
+except Exception as e:
+    logger.error(f"Error registering public verification router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"

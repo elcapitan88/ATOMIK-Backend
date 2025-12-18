@@ -460,8 +460,163 @@ async def get_user_beta_features(db, user_id: int, user=None) -> List[str]:
 # Beta feature constants
 BETA_FEATURES = {
     "ADVANCED_ANALYTICS": "advanced-analytics",
-    "NEW_DASHBOARD": "new-dashboard", 
+    "NEW_DASHBOARD": "new-dashboard",
     "EXPERIMENTAL_TRADING": "experimental-trading",
     "AI_INSIGHTS": "ai-insights",
     "ADVANCED_CHARTS": "advanced-charts"
 }
+
+
+# =============================================================================
+# Phase 1.2: User Mode Permission Decorators
+# =============================================================================
+
+def require_creator_mode(func: Callable):
+    """
+    Decorator that requires user to be in creator mode (private_creator or public_creator).
+    Blocks subscribers from accessing creator-only features like strategy building.
+
+    Usage:
+        @router.post("/strategies/codes")
+        @require_creator_mode
+        async def create_strategy_code(...):
+            ...
+    """
+    @wraps(func)
+    async def wrapper(*args, current_user=None, **kwargs):
+        try:
+            if not current_user:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Authentication required"
+                )
+
+            # Import here to avoid circular imports
+            from app.models.user import UserMode
+
+            if current_user.user_mode == UserMode.SUBSCRIBER:
+                logger.warning(f"Creator mode required: user {current_user.id} is a subscriber")
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "CREATOR_MODE_REQUIRED",
+                        "message": "This feature requires creator mode. Upgrade your subscription to create and manage strategies.",
+                        "current_mode": current_user.user_mode.value if hasattr(current_user.user_mode, 'value') else str(current_user.user_mode),
+                        "upgrade_path": "/pricing"
+                    }
+                )
+
+            return await func(*args, current_user=current_user, **kwargs)
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Creator mode check error: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error checking user mode"
+            )
+
+    return wrapper
+
+
+def require_public_creator(func: Callable):
+    """
+    Decorator that requires user to be a public creator.
+    Only public creators can publish strategies to the marketplace and monetize.
+
+    Usage:
+        @router.post("/strategies/{id}/publish")
+        @require_public_creator
+        async def publish_strategy(...):
+            ...
+    """
+    @wraps(func)
+    async def wrapper(*args, current_user=None, **kwargs):
+        try:
+            if not current_user:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Authentication required"
+                )
+
+            # Import here to avoid circular imports
+            from app.models.user import UserMode
+
+            if current_user.user_mode != UserMode.PUBLIC_CREATOR:
+                logger.warning(f"Public creator required: user {current_user.id} has mode {current_user.user_mode}")
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "PUBLIC_CREATOR_REQUIRED",
+                        "message": "Only public creators can publish strategies to the marketplace. Complete creator onboarding to unlock this feature.",
+                        "current_mode": current_user.user_mode.value if hasattr(current_user.user_mode, 'value') else str(current_user.user_mode),
+                        "upgrade_path": "/creator-onboarding"
+                    }
+                )
+
+            return await func(*args, current_user=current_user, **kwargs)
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Public creator check error: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error checking creator status"
+            )
+
+    return wrapper
+
+
+def require_strategy_unlocked(func: Callable):
+    """
+    Decorator that checks if a strategy is unlocked before allowing modifications.
+    Used to enforce immutability of locked strategies.
+
+    Note: This decorator expects 'strategy' or 'strategy_code' in kwargs,
+    or looks for code_id/strategy_id in path parameters.
+
+    Usage:
+        @router.put("/strategies/codes/{code_id}")
+        @require_strategy_unlocked
+        async def update_strategy_code(...):
+            ...
+    """
+    @wraps(func)
+    async def wrapper(*args, db=None, **kwargs):
+        try:
+            strategy = kwargs.get('strategy') or kwargs.get('strategy_code')
+
+            # If strategy not directly provided, try to fetch it
+            if not strategy and db:
+                from app.models.strategy_code import StrategyCode
+                code_id = kwargs.get('code_id') or kwargs.get('strategy_id')
+                if code_id:
+                    strategy = db.query(StrategyCode).filter(StrategyCode.id == code_id).first()
+
+            if strategy and strategy.locked_at:
+                logger.warning(f"Strategy {strategy.id} is locked and cannot be modified")
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "STRATEGY_LOCKED",
+                        "message": "This strategy is locked and cannot be modified. Create a new version instead.",
+                        "locked_at": strategy.locked_at.isoformat() if strategy.locked_at else None,
+                        "combined_hash": strategy.combined_hash,
+                        "action": "Create a new version using POST /strategies/codes/{id}/new-version"
+                    }
+                )
+
+            return await func(*args, db=db, **kwargs)
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Strategy lock check error: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error checking strategy lock status"
+            )
+
+    return wrapper
