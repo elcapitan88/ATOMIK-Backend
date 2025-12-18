@@ -11,8 +11,9 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
 
-from ..models.trade import Trade, TradeExecution
+from ..models.trade import Trade, TradeExecution, ExecutionEnvironment
 from ..models.strategy import ActivatedStrategy
+from ..models.strategy_code import StrategyCode
 from ..models.user import User
 from ..models.order import Order
 
@@ -58,14 +59,40 @@ class TradeService:
                 logger.warning(f"Trade already exists for position_id: {position_id}")
                 return existing_trade
             
-            # Determine strategy attribution
+            # Determine strategy attribution (ActivatedStrategy and StrategyCode)
+            strategy_version_id = None
             if not strategy_id:
-                strategy_id = await self._determine_strategy_attribution(user_id, position_data)
-            
+                strategy_id, strategy_version_id = await self._determine_strategy_attribution(user_id, position_data)
+            else:
+                # If strategy_id provided, look up the strategy_code_id
+                activated = self.db.query(ActivatedStrategy).filter(
+                    ActivatedStrategy.id == strategy_id
+                ).first()
+                if activated and activated.strategy_code_id:
+                    strategy_version_id = activated.strategy_code_id
+
+            # Determine if this is a verified live trade
+            # Live verification requires: broker fill ID and execution timestamp
+            has_broker_fill = bool(position_data.get('execution_id') or position_data.get('fill_id'))
+            has_broker_time = bool(position_data.get('execution_time') or position_data.get('timestamp'))
+            is_verified_live = has_broker_fill and has_broker_time
+
+            # Determine execution environment
+            exec_env = position_data.get('execution_environment', 'live')
+            if exec_env == 'paper':
+                execution_environment = ExecutionEnvironment.PAPER
+                is_verified_live = False  # Paper trades are never verified live
+            elif exec_env == 'backtest':
+                execution_environment = ExecutionEnvironment.BACKTEST
+                is_verified_live = False  # Backtests are never verified live
+            else:
+                execution_environment = ExecutionEnvironment.LIVE
+
             # Create new trade record
             trade = Trade(
                 user_id=user_id,
                 strategy_id=strategy_id,
+                strategy_version_id=strategy_version_id,  # Phase 1.3: Link to StrategyCode
                 position_id=position_id,
                 broker_id=position_data.get('broker_id', 'unknown'),
                 symbol=position_data.get('symbol', ''),
@@ -75,14 +102,19 @@ class TradeService:
                 average_entry_price=Decimal(str(position_data.get('average_price', 0))),
                 status="open",
                 open_time=datetime.utcnow(),
-                broker_data=str(position_data) if position_data else None
+                broker_data=str(position_data) if position_data else None,
+                execution_environment=execution_environment,  # Phase 1.3
+                is_verified_live=is_verified_live  # Phase 1.3
             )
-            
+
             self.db.add(trade)
             self.db.commit()
             self.db.refresh(trade)
-            
-            logger.info(f"Created trade {trade.id} for position {position_id}")
+
+            logger.info(
+                f"Created trade {trade.id} for position {position_id}, "
+                f"strategy_version_id={strategy_version_id}, verified_live={is_verified_live}"
+            )
             return trade
             
         except Exception as e:
@@ -148,11 +180,12 @@ class TradeService:
     ) -> Optional[Trade]:
         """
         Close a trade and calculate final P&L.
-        
+        Also updates the strategy's live performance metrics.
+
         Args:
             position_id: Position ID to find the trade
             position_data: Final position data from WebSocket
-            
+
         Returns:
             Closed Trade object or None if not found
         """
@@ -161,28 +194,48 @@ class TradeService:
                 Trade.position_id == position_id,
                 Trade.status == "open"
             ).first()
-            
+
             if not trade:
                 logger.warning(f"No open trade found for position_id: {position_id}")
                 return None
-            
+
             # Extract final P&L and exit price
             realized_pnl = position_data.get('realized_pnl', 0)
             exit_price = position_data.get('exit_price') or position_data.get('current_price', 0)
-            
+
             # Close the trade
             trade.close_trade(
                 exit_price=float(exit_price),
                 realized_pnl=float(realized_pnl),
                 close_time=datetime.utcnow()
             )
-            
+
+            # Phase 1.3: Update strategy's live performance metrics
+            # Only update if trade is verified live and linked to a strategy version
+            if trade.is_verified_live and trade.strategy_version_id:
+                strategy_code = self.db.query(StrategyCode).filter(
+                    StrategyCode.id == trade.strategy_version_id
+                ).first()
+
+                if strategy_code:
+                    is_win = float(realized_pnl) > 0
+                    strategy_code.update_live_performance(
+                        pnl=float(realized_pnl),
+                        is_win=is_win
+                    )
+                    logger.info(
+                        f"Updated strategy {strategy_code.id} performance: "
+                        f"trades={strategy_code.live_total_trades}, "
+                        f"pnl={strategy_code.live_total_pnl}, "
+                        f"win_rate={strategy_code.live_win_rate}%"
+                    )
+
             self.db.commit()
             self.db.refresh(trade)
-            
+
             logger.info(f"Closed trade {trade.id} - P&L: {realized_pnl}, Duration: {trade.duration_seconds}s")
             return trade
-            
+
         except Exception as e:
             logger.error(f"Error closing trade: {str(e)}", exc_info=True)
             self.db.rollback()
@@ -359,32 +412,38 @@ class TradeService:
         self,
         user_id: int,
         position_data: Dict[str, Any]
-    ) -> Optional[int]:
+    ) -> tuple:
         """
         Determine which strategy should be attributed to this position.
-        This is a simplified version - can be enhanced with more sophisticated logic.
+        Returns both ActivatedStrategy.id (strategy_id) and StrategyCode.id (strategy_version_id).
+
+        Returns:
+            Tuple of (strategy_id, strategy_version_id) or (None, None) if not found
         """
         try:
             # Get the most recent active strategy for this user and symbol
             symbol = position_data.get('symbol', '')
-            
+
             strategy = self.db.query(ActivatedStrategy).filter(
                 ActivatedStrategy.user_id == user_id,
                 ActivatedStrategy.ticker == symbol,
                 ActivatedStrategy.is_active == True
             ).order_by(desc(ActivatedStrategy.last_triggered)).first()
-            
+
             if strategy:
-                return strategy.id
-            
+                return strategy.id, strategy.strategy_code_id
+
             # Fallback: get any active strategy for this user
             fallback_strategy = self.db.query(ActivatedStrategy).filter(
                 ActivatedStrategy.user_id == user_id,
                 ActivatedStrategy.is_active == True
             ).order_by(desc(ActivatedStrategy.created_at)).first()
-            
-            return fallback_strategy.id if fallback_strategy else None
-            
+
+            if fallback_strategy:
+                return fallback_strategy.id, fallback_strategy.strategy_code_id
+
+            return None, None
+
         except Exception as e:
             logger.error(f"Error determining strategy attribution: {str(e)}")
-            return None
+            return None, None
