@@ -28,8 +28,9 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
     # Phase 1.2: User mode for strict type separation
+    # Note: values_callable ensures SQLAlchemy uses enum values (lowercase) not names (uppercase)
     user_mode = Column(
-        Enum(UserMode, name='user_mode_enum'),
+        Enum(UserMode, name='user_mode_enum', values_callable=lambda x: [e.value for e in x]),
         default=UserMode.SUBSCRIBER,
         nullable=False,
         index=True

@@ -65,8 +65,9 @@ class Trade(Base):
     tags = Column(String(500), nullable=True)  # Comma-separated tags
 
     # Phase 1.3: Live verification tracking
+    # Note: values_callable ensures SQLAlchemy uses enum values (lowercase) not names (uppercase)
     execution_environment = Column(
-        Enum(ExecutionEnvironment, name='exec_env_enum'),
+        Enum(ExecutionEnvironment, name='exec_env_enum', values_callable=lambda x: [e.value for e in x]),
         default=ExecutionEnvironment.LIVE,
         nullable=False
     )
