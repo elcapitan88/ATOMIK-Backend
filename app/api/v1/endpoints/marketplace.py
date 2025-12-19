@@ -190,7 +190,7 @@ async def get_available_strategies(
             
             strategy_data = {
                 "id": f"engine_{strategy_code.id}",
-                "strategy_type": "engine", 
+                "strategy_type": "engine",
                 "source_id": strategy_code.id,  # Use integer ID for strategy engine
                 "name": strategy_code.name,
                 "display_name": display_name,
@@ -210,7 +210,15 @@ async def get_available_strategies(
                 "signals_generated": strategy_code.signals_generated if hasattr(strategy_code, 'signals_generated') else 0,
                 "user_activations": active_activation_count,
                 "created_at": strategy_code.created_at.isoformat() if strategy_code.created_at else None,
-                "last_signal_at": strategy_code.last_signal_at.isoformat() if hasattr(strategy_code, 'last_signal_at') and strategy_code.last_signal_at else None
+                "last_signal_at": strategy_code.last_signal_at.isoformat() if hasattr(strategy_code, 'last_signal_at') and strategy_code.last_signal_at else None,
+                # Phase 2: Trust metrics for verified live performance
+                "live_total_trades": strategy_code.live_total_trades or 0,
+                "live_winning_trades": strategy_code.live_winning_trades or 0,
+                "live_total_pnl": float(strategy_code.live_total_pnl) if strategy_code.live_total_pnl else 0.0,
+                "live_win_rate": float(strategy_code.live_win_rate) if strategy_code.live_win_rate else 0.0,
+                "combined_hash": strategy_code.combined_hash,
+                "is_locked": strategy_code.locked_at is not None,
+                "locked_at": strategy_code.locked_at.isoformat() if strategy_code.locked_at else None
             }
             
             available_strategies.append(strategy_data)
