@@ -116,21 +116,31 @@ This document tracks the implementation of Atomik's trust and verification syste
 
 ---
 
-## Phase 3: Public Verification Page (FUTURE)
+## Phase 3: Public Verification Page (DEFERRED - NOT NEEDED)
+
+**Status:** Functionality already covered by Phase 2 components (public marketplace, StrategyDetailModal, creator profiles)
 
 ### Phase 3.1: `/verify/{hash}` Frontend Page
-- [ ] Create standalone public page at `/verify/{hash}`
-- [ ] No authentication required
+- [x] DEFERRED - Create standalone public page at `/verify/{hash}`
+- [x] DEFERRED - No authentication required
 - [ ] Shows: strategy name, creator, locked date, performance, hash verification status
 - [ ] Link to marketplace/creator profile for more info
 - [ ] Shareable on social media for credibility
 
 ---
 
-## Phase 4: Creator Onboarding (FUTURE)
+## Phase 4: Creator Onboarding (DEFERRED - CURRENT IMPLEMENTATION SUFFICIENT)
 
-### Phase 4.1: Mode Upgrade Flow
-- [ ] Create `/creator-onboarding` page
+**Status:** Current implementation already provides functional creator onboarding via IntentDiscovery + quickSetupCreator. Phase 4 improvements are UX polish and legal compliance, not functional requirements.
+
+**Current Implementation:**
+- IntentDiscovery component handles creator intent selection during strategy creation
+- quickSetupCreator() creates profile and redirects to Stripe Connect
+- CreatorHub provides dashboard for existing creators
+- Works end-to-end for monetization flow
+
+### Phase 4.1: Mode Upgrade Flow (Future UX Enhancement)
+- [x] DEFERRED - Create `/creator-onboarding` page
 - [ ] Step 1: Accept creator terms
 - [ ] Step 2: Verify identity (optional for public creators)
 - [ ] Step 3: Complete profile
