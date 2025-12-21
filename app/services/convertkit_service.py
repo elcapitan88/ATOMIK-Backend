@@ -1,6 +1,8 @@
 """
 ConvertKit API Service for email marketing automation.
 Used for lead capture and email sequence management.
+
+Uses ConvertKit API v3 (stable) for authentication.
 """
 import httpx
 import logging
@@ -11,16 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class ConvertKitService:
-    """Service to interact with ConvertKit API for email marketing"""
+    """Service to interact with ConvertKit API v3 for email marketing"""
 
     def __init__(self):
-        self.api_key = os.getenv("CONVERTKIT_API_KEY")
+        # V3 API uses api_secret for authentication
         self.api_secret = os.getenv("CONVERTKIT_API_SECRET")
-        self.base_url = "https://api.convertkit.com/v4"
+        self.api_key = os.getenv("CONVERTKIT_API_KEY")  # V3 public API key
+        self.base_url = "https://api.convertkit.com/v3"
         self.sequence_id = os.getenv("CONVERTKIT_BLUEPRINT_SEQUENCE_ID", "2594476")
 
-        if not self.api_key:
-            logger.warning("CONVERTKIT_API_KEY environment variable not set")
+        if not self.api_secret:
+            logger.warning("CONVERTKIT_API_SECRET environment variable not set")
 
     async def add_subscriber_to_sequence(
         self,
@@ -41,32 +44,28 @@ class ConvertKitService:
         Returns:
             dict: Response with subscriber info or error
         """
-        if not self.api_key:
-            logger.error("ConvertKit API key not configured")
+        if not self.api_secret:
+            logger.error("ConvertKit API secret not configured")
             return {"success": False, "error": "ConvertKit not configured"}
 
         target_sequence = sequence_id or self.sequence_id
 
-        # Build subscriber data
-        subscriber_data = {
-            "email_address": email
+        # V3 API format - api_secret goes in the body
+        payload = {
+            "api_secret": self.api_secret,
+            "email": email
         }
 
         if first_name:
-            subscriber_data["first_name"] = first_name
-
-        payload = {
-            "subscriber": subscriber_data
-        }
+            payload["first_name"] = first_name
 
         async with httpx.AsyncClient() as client:
             try:
-                # Add subscriber to sequence using v4 API
+                # V3 endpoint: /sequences/{id}/subscribe
                 response = await client.post(
-                    f"{self.base_url}/sequences/{target_sequence}/subscribers",
+                    f"{self.base_url}/sequences/{target_sequence}/subscribe",
                     json=payload,
                     headers={
-                        "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json"
                     }
                 )
@@ -76,7 +75,7 @@ class ConvertKitService:
                     logger.info(f"Successfully added {email} to sequence {target_sequence}")
                     return {
                         "success": True,
-                        "subscriber": data.get("subscriber", {}),
+                        "subscriber": data.get("subscription", {}),
                         "message": "Subscriber added to sequence"
                     }
                 elif response.status_code == 422:
@@ -121,49 +120,9 @@ class ConvertKitService:
         Returns:
             dict: Response with subscriber info or error
         """
-        if not self.api_key:
-            logger.error("ConvertKit API key not configured")
-            return {"success": False, "error": "ConvertKit not configured"}
-
-        subscriber_data = {
-            "email_address": email
-        }
-
-        if first_name:
-            subscriber_data["first_name"] = first_name
-
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"{self.base_url}/subscribers",
-                    json=subscriber_data,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
-                    }
-                )
-
-                if response.status_code in [200, 201]:
-                    data = response.json()
-                    logger.info(f"Successfully added subscriber {email}")
-                    return {
-                        "success": True,
-                        "subscriber": data.get("subscriber", {}),
-                        "message": "Subscriber added successfully"
-                    }
-                else:
-                    logger.error(f"ConvertKit API error: {response.status_code} - {response.text}")
-                    return {
-                        "success": False,
-                        "error": f"API error: {response.status_code}"
-                    }
-
-            except Exception as e:
-                logger.error(f"Error adding subscriber to ConvertKit: {str(e)}")
-                return {
-                    "success": False,
-                    "error": str(e)
-                }
+        # For general subscribers without a sequence, we'll use a form or just add to sequence
+        # Redirect to sequence-based subscription for the blueprint
+        return await self.add_subscriber_to_sequence(email=email, first_name=first_name)
 
     async def get_subscriber(self, email: str) -> dict:
         """
@@ -175,17 +134,17 @@ class ConvertKitService:
         Returns:
             dict: Subscriber info if found
         """
-        if not self.api_key:
+        if not self.api_secret:
             return {"success": False, "error": "ConvertKit not configured"}
 
         async with httpx.AsyncClient() as client:
             try:
+                # V3 endpoint to get subscriber by email
                 response = await client.get(
                     f"{self.base_url}/subscribers",
-                    params={"email_address": email},
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                    params={
+                        "api_secret": self.api_secret,
+                        "email_address": email
                     }
                 )
 
