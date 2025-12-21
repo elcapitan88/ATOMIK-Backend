@@ -23,6 +23,10 @@ try:
     # Phase 1: Public verification endpoints (no auth required)
     from .endpoints import public_verification
     logger.info("Public verification endpoint imported successfully")
+
+    # Lead capture endpoints (no auth required)
+    from .endpoints import leads
+    logger.info("Leads endpoint imported successfully")
 except Exception as e:
     logger.error(f"Error importing endpoints: {e}")
     import traceback
@@ -134,6 +138,13 @@ try:
     logger.info("Public verification router registered - accessible without authentication")
 except Exception as e:
     logger.error(f"Error registering public verification router: {e}")
+
+# Lead capture router (NO AUTH REQUIRED - marketing funnel)
+try:
+    api_router.include_router(leads.router, prefix="/leads", tags=["leads"])
+    logger.info("Leads router registered - accessible without authentication")
+except Exception as e:
+    logger.error(f"Error registering leads router: {e}")
 
 # Define the callback route - Notice the change in the path
 @tradovate_callback_router.get("/tradovate/callback")  # Changed from "/api/tradovate/callback"
