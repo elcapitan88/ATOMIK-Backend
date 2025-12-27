@@ -111,8 +111,8 @@ class Subscription(Base):
     @property
     def display_tier_name(self):
         """Get the marketing display name for the tier"""
-        from app.core.subscription_tiers import get_tier_display_name
-        return get_tier_display_name(self.tier)
+        # Tier names now match their display names (free, starter, trader, unlimited)
+        return self.tier.capitalize() if self.tier else "Free"
         
     def set_trial_period(self, days=7):
         """Set up a trial period for this subscription"""

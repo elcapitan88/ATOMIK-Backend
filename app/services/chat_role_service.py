@@ -5,7 +5,7 @@ from sqlalchemy import and_, or_
 from ..models.chat import UserChatRole
 from ..models.user import User
 from ..models.subscription import Subscription
-from ..core.subscription_tiers import SubscriptionTier, get_tier_display_name
+from ..core.subscription_tiers import SubscriptionTier
 
 
 # Role color mapping based on subscription tiers
@@ -14,19 +14,23 @@ ROLE_COLORS = {
     'Moderator': '#FFA500',
     'Beta Tester': '#9932CC',  # Purple for beta testers
     'Legacy Free': '#808080',  # For grandfathered free users
-    'Starter': '#FFFFFF',      # New display name for Pro tier
-    'Pro': '#00C6E0',         # New display name for Elite tier
-    'VIP': '#FFD700',         # For special users
+    'Free': '#808080',         # Free tier
+    'Starter': '#4CAF50',      # $49/mo tier - green
+    'Trader': '#00C6E0',       # $129/mo tier - cyan
+    'Unlimited': '#FFD700',    # $249/mo tier - gold
+    'VIP': '#FFD700',          # For special users
 }
 
 # Role priority mapping (higher = more important)
 ROLE_PRIORITIES = {
     'Admin': 100,
     'Moderator': 90,
-    'Beta Tester': 80,
     'VIP': 85,
-    'Pro': 70,
+    'Beta Tester': 80,
+    'Unlimited': 75,
+    'Trader': 70,
     'Starter': 60,
+    'Free': 55,
     'Legacy Free': 50,
 }
 
@@ -59,14 +63,14 @@ async def assign_default_role_from_subscription(
     elif subscription.is_legacy_free:
         role_name = 'Legacy Free'
     else:
-        # Use the display name from subscription tiers
-        role_name = get_tier_display_name(subscription.tier)
-    
+        # Tier names now match their display names (free, starter, trader, unlimited)
+        role_name = subscription.tier.capitalize() if subscription.tier else 'Free'
+
     # Remove existing subscription-based roles (keep Admin/Moderator/Beta Tester roles)
     db.query(UserChatRole).filter(
         and_(
             UserChatRole.user_id == user_id,
-            UserChatRole.role_name.in_(['Legacy Free', 'Starter', 'Pro', 'VIP']),
+            UserChatRole.role_name.in_(['Legacy Free', 'Free', 'Starter', 'Trader', 'Unlimited', 'VIP']),
             UserChatRole.is_active == True
         )
     ).update({UserChatRole.is_active: False})
