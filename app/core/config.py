@@ -319,6 +319,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = True
         env_file_encoding = 'utf-8'
+        extra = "ignore"  # Ignore extra env vars not defined in Settings
 
     @property
     def active_server_host(self) -> str:
