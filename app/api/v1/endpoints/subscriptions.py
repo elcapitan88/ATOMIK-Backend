@@ -394,7 +394,7 @@ async def stripe_webhook(
                     # Set trial information if applicable
                     if metadata.get('has_trial') == 'True' and pending_reg.plan_interval != 'lifetime':
                         subscription.is_in_trial = True
-                        subscription.trial_ends_at = datetime.utcnow() + timedelta(days=14)
+                        subscription.trial_ends_at = datetime.utcnow() + timedelta(days=7)
                     
                     db.add(subscription)
                     
