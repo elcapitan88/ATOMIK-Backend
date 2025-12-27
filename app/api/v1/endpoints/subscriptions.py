@@ -1168,17 +1168,19 @@ async def handle_subscription_deletion(db: Session, subscription: dict):
 def get_price_id(tier: str, interval: str) -> str:
     """Get the Stripe Price ID for a specific tier and interval"""
     price_mapping = {
-        # Pro tier
-        ('pro', 'monthly'): settings.STRIPE_PRICE_PRO_MONTHLY,
-        ('pro', 'yearly'): settings.STRIPE_PRICE_PRO_YEARLY,
-        ('pro', 'lifetime'): settings.STRIPE_PRICE_PRO_LIFETIME,
-        
-        # Elite tier
-        ('elite', 'monthly'): settings.STRIPE_PRICE_ELITE_MONTHLY,
-        ('elite', 'yearly'): settings.STRIPE_PRICE_ELITE_YEARLY,
-        ('elite', 'lifetime'): settings.STRIPE_PRICE_ELITE_LIFETIME,
+        # Starter tier - $49/month
+        ('starter', 'monthly'): settings.STRIPE_PRICE_STARTER_MONTHLY,
+        ('starter', 'yearly'): settings.STRIPE_PRICE_STARTER_YEARLY,
+
+        # Trader tier - $129/month
+        ('trader', 'monthly'): settings.STRIPE_PRICE_TRADER_MONTHLY,
+        ('trader', 'yearly'): settings.STRIPE_PRICE_TRADER_YEARLY,
+
+        # Unlimited tier - $249/month
+        ('unlimited', 'monthly'): settings.STRIPE_PRICE_UNLIMITED_MONTHLY,
+        ('unlimited', 'yearly'): settings.STRIPE_PRICE_UNLIMITED_YEARLY,
     }
-    
+
     return price_mapping.get((tier, interval))
 
 @router.post("/admin/sync-resource-counts")

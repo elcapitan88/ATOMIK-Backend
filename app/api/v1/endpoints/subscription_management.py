@@ -120,30 +120,35 @@ async def get_subscription_tiers():
         
         # Add feature highlights for each tier
         feature_highlights = {
-            SubscriptionTier.STARTER: [
-                "1 connected trading account",
-                "1 active webhook",
-                "1 active strategy",
-                "Basic webhook configurations",
-                "Manual trade execution",
-                "Community support"
+            SubscriptionTier.FREE.value: [
+                "Browse marketplace strategies",
+                "View strategy performance",
+                "Create account"
             ],
-            SubscriptionTier.PRO: [
-                "5 connected trading accounts",
-                "5 active webhooks",
-                "5 active strategies",
+            SubscriptionTier.STARTER.value: [
+                "2 connected trading accounts",
+                "3 active webhooks",
+                "3 active strategies",
                 "Group strategies",
                 "Webhook sharing",
-                "Advanced webhook configurations",
+                "Subscribe to marketplace strategies",
+                "7-day free trial"
+            ],
+            SubscriptionTier.TRADER.value: [
+                "10 connected trading accounts",
+                "10 active webhooks",
+                "10 active strategies",
+                "Group strategies & webhook sharing",
+                "Sell strategies on marketplace",
                 "Email & chat support",
                 "Higher rate limits"
             ],
-            SubscriptionTier.ELITE: [
+            SubscriptionTier.UNLIMITED.value: [
                 "Unlimited connected accounts",
                 "Unlimited active webhooks",
                 "Unlimited strategies",
                 "Unlimited rate limits",
-                "Group strategies & webhook sharing",
+                "Sell strategies on marketplace",
                 "Priority support",
                 "Early access to new features"
             ]
@@ -231,36 +236,46 @@ async def synchronize_resource_counts(
 
 def get_next_tier_info(current_tier: str) -> Dict[str, Any]:
     """Get info about the next tier up from current tier"""
-    if current_tier == SubscriptionTier.ELITE:
+    if current_tier == SubscriptionTier.UNLIMITED.value:
         return None
-        
+
     next_tier = None
-    if current_tier == SubscriptionTier.STARTER:
-        next_tier = SubscriptionTier.PRO
-    elif current_tier == SubscriptionTier.PRO:
-        next_tier = SubscriptionTier.ELITE
-        
+    if current_tier == SubscriptionTier.FREE.value:
+        next_tier = SubscriptionTier.STARTER.value
+    elif current_tier == SubscriptionTier.STARTER.value:
+        next_tier = SubscriptionTier.TRADER.value
+    elif current_tier == SubscriptionTier.TRADER.value:
+        next_tier = SubscriptionTier.UNLIMITED.value
+
     if next_tier:
         return {
             "tier": next_tier,
             "upgrade_benefits": get_upgrade_benefits(current_tier, next_tier)
         }
-    
+
     return None
 
 def get_upgrade_benefits(current_tier: str, next_tier: str) -> List[str]:
     """Get list of benefits when upgrading from current tier to next tier"""
-    if current_tier == SubscriptionTier.STARTER and next_tier == SubscriptionTier.PRO:
+    if current_tier == SubscriptionTier.FREE.value and next_tier == SubscriptionTier.STARTER.value:
         return [
-            "Increase connected accounts from 1 to 5",
-            "Increase active webhooks from 1 to 5",
-            "Increase active strategies from 1 to 5",
-            "Unlock group strategy functionality",
-            "Enable webhook sharing",
-            "Higher API rate limits (500/min vs 100/min)",
-            "Faster webhook processing (300/min vs 60/min)"
+            "Connect 2 trading accounts",
+            "Create 3 webhooks",
+            "Activate 3 strategies",
+            "Execute trades automatically",
+            "Subscribe to marketplace strategies",
+            "Group strategies & webhook sharing"
         ]
-    elif current_tier == SubscriptionTier.PRO and next_tier == SubscriptionTier.ELITE:
+    elif current_tier == SubscriptionTier.STARTER.value and next_tier == SubscriptionTier.TRADER.value:
+        return [
+            "Increase connected accounts from 2 to 10",
+            "Increase active webhooks from 3 to 10",
+            "Increase active strategies from 3 to 10",
+            "Sell your strategies on the marketplace",
+            "Higher API rate limits",
+            "Faster webhook processing"
+        ]
+    elif current_tier == SubscriptionTier.TRADER.value and next_tier == SubscriptionTier.UNLIMITED.value:
         return [
             "Unlimited connected accounts",
             "Unlimited active webhooks",
@@ -274,55 +289,63 @@ def get_upgrade_benefits(current_tier: str, next_tier: str) -> List[str]:
 def generate_tier_comparison_chart() -> Dict[str, Dict[str, Any]]:
     """Generate a comparison chart for subscription tiers"""
     return {
-        "columns": ["Feature", "Starter", "Pro", "Elite"],
+        "columns": ["Feature", "Free", "Starter", "Trader", "Unlimited"],
         "rows": [
             {
+                "Feature": "Price",
+                "Free": "$0",
+                "Starter": "$49/mo",
+                "Trader": "$129/mo",
+                "Unlimited": "$249/mo"
+            },
+            {
                 "Feature": "Connected Accounts",
-                "Starter": "1",
-                "Pro": "5",
-                "Elite": "Unlimited"
+                "Free": "0",
+                "Starter": "2",
+                "Trader": "10",
+                "Unlimited": "Unlimited"
             },
             {
                 "Feature": "Active Webhooks",
-                "Starter": "1",
-                "Pro": "5",
-                "Elite": "Unlimited"
+                "Free": "0",
+                "Starter": "3",
+                "Trader": "10",
+                "Unlimited": "Unlimited"
             },
             {
                 "Feature": "Active Strategies",
-                "Starter": "1",
-                "Pro": "5",
-                "Elite": "Unlimited"
+                "Free": "0",
+                "Starter": "3",
+                "Trader": "10",
+                "Unlimited": "Unlimited"
             },
             {
-                "Feature": "Group Strategies",
-                "Starter": "❌",
-                "Pro": "✅",
-                "Elite": "✅"
+                "Feature": "Trade Execution",
+                "Free": "No",
+                "Starter": "Yes",
+                "Trader": "Yes",
+                "Unlimited": "Yes"
             },
             {
-                "Feature": "Webhook Sharing",
-                "Starter": "❌",
-                "Pro": "✅",
-                "Elite": "✅"
+                "Feature": "Subscribe to Strategies",
+                "Free": "No",
+                "Starter": "Yes",
+                "Trader": "Yes",
+                "Unlimited": "Yes"
             },
             {
-                "Feature": "API Rate Limit",
-                "Starter": "100/min",
-                "Pro": "500/min",
-                "Elite": "Unlimited"
-            },
-            {
-                "Feature": "Webhook Processing",
-                "Starter": "60/min",
-                "Pro": "300/min",
-                "Elite": "Unlimited"
+                "Feature": "Sell Strategies",
+                "Free": "No",
+                "Starter": "No",
+                "Trader": "Yes",
+                "Unlimited": "Yes"
             },
             {
                 "Feature": "Priority Support",
-                "Starter": "❌",
-                "Pro": "❌",
-                "Elite": "✅"
+                "Free": "No",
+                "Starter": "No",
+                "Trader": "No",
+                "Unlimited": "Yes"
             }
         ]
     }

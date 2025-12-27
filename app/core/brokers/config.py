@@ -188,6 +188,29 @@ BROKER_CONFIGS = {
         },
         logo_url="/logos/interactive-brokers.svg",
         docs_url="https://interactivebrokers.github.io/cpwebapi/"
+    ),
+    
+    "polymarket": BrokerConfig(
+        id="polymarket",
+        name="Polymarket",
+        description="Polymarket CLOB - Prediction Markets",
+        environments=[BrokerEnvironment.LIVE],
+        connection_method=ConnectionMethod.API_KEY,
+        features=BrokerFeatures(
+            real_time_data=True,
+            supports_websocket=True,
+            supported_order_types=["LIMIT", "GTC"],
+            supports_multiple_accounts=False,
+            supported_assets=["PREDICTION_MARKETS"]
+        ),
+        api_endpoints={
+            "live": ApiEndpointConfig(
+                base="https://clob.polymarket.com",
+                websocket=""
+            )
+        },
+        logo_url="/logos/polymarket.svg",
+        docs_url="https://docs.polymarket.com/"
     )
     # Add more brokers as needed
 }
