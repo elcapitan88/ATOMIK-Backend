@@ -796,8 +796,8 @@ async def register_with_promo_code(
                 # Increment usage counter
                 validation["promo_code"].current_uses += 1
                 
-                # Set subscription to Elite lifetime
-                tier = "elite"
+                # Set subscription to Unlimited lifetime
+                tier = "unlimited"
                 is_lifetime = True
                 promo_code_applied = True
                 

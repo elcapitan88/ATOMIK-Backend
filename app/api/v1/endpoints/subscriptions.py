@@ -258,39 +258,53 @@ async def get_price_tiers():
     return {
         "tiers": [
             {
-                "id": "pro",  # Internal tier ID
-                "name": "Starter",  # New marketing name
-                "description": "For serious traders seeking automation and reliability",
-                "prices": {"monthly": 49, "yearly": 468, "lifetime": 990},
+                "id": "starter",
+                "name": "Starter",
+                "description": "For traders starting their automation journey",
+                "prices": {"monthly": 49, "yearly": 468},
                 "features": [
-                    "Up to 5 connected trading accounts",
-                    "5 active webhooks",
-                    "5 active strategies",
+                    "2 connected trading accounts",
+                    "3 active webhooks",
+                    "3 active strategies",
                     "Group strategies",
                     "Webhook sharing",
-                    "Advanced position management",
+                    "Subscribe to marketplace strategies",
                     "Trade history & analytics",
-                    "Email support"
+                    "Community support"
                 ],
-                "free_trial": "14-day free trial"
+                "free_trial": "7-day free trial"
             },
             {
-                "id": "elite",  # Internal tier ID
-                "name": "Pro",  # New marketing name
+                "id": "trader",
+                "name": "Trader",
+                "description": "For serious traders seeking automation and reliability",
+                "prices": {"monthly": 129, "yearly": 1188},
+                "features": [
+                    "10 connected trading accounts",
+                    "10 active webhooks",
+                    "10 active strategies",
+                    "All Starter features",
+                    "Sell strategies on marketplace",
+                    "Advanced position management",
+                    "Email & chat support"
+                ],
+                "free_trial": "7-day free trial"
+            },
+            {
+                "id": "unlimited",
+                "name": "Unlimited",
                 "description": "For professional traders and institutions",
-                "prices": {"monthly": 89, "yearly": 828, "lifetime": 1990},
+                "prices": {"monthly": 249, "yearly": 2388},
                 "features": [
                     "Unlimited connected accounts",
-                    "Unlimited webhooks & configs",
-                    "Unlimited strategies",
-                    "Enterprise-grade webhooks",
-                    "Advanced trade execution rules",
+                    "Unlimited webhooks & strategies",
+                    "All Trader features",
                     "Funded Account Functionality",
                     "Early access to new features",
                     "Advanced analytics & reporting",
                     "Priority technical support"
                 ],
-                "free_trial": "14-day free trial"
+                "free_trial": "7-day free trial"
             }
         ]
     }
@@ -935,55 +949,6 @@ async def debug_environment():
         "active_server_host": getattr(settings, 'active_server_host', None) or settings.SERVER_HOST,
         "api_base_url": settings.API_V1_STR,
         "is_production": settings.ENVIRONMENT == "production",
-    }
-
-@router.get("/price-tiers")
-async def get_price_tiers():
-    """Get information about available subscription tiers"""
-    return {
-        "tiers": [
-            {
-                "id": "starter",
-                "name": "Starter",
-                "description": "Perfect for beginners exploring algorithmic trading",
-                "prices": {"monthly": 0, "yearly": 0, "lifetime": 0},
-                "features": [
-                    "1 connected trading account",
-                    "Up to 3 active webhooks",
-                    "Basic webhook integrations",
-                    "Manual trade execution",
-                    "Community support"
-                ]
-            },
-            {
-                "id": "pro",
-                "name": "Pro",
-                "description": "For serious traders seeking automation and reliability",
-                "prices": {"monthly": 49, "yearly": 468, "lifetime": 990},
-                "features": [
-                    "Up to 5 connected trading accounts",
-                    "Unlimited active webhooks",
-                    "Advanced webhook configurations",
-                    "Automated trade execution",
-                    "Email & chat support",
-                    "Advanced position management"
-                ]
-            },
-            {
-                "id": "elite",
-                "name": "Elite",
-                "description": "For professional traders and institutions",
-                "prices": {"monthly": 89, "yearly": 828, "lifetime": 1990},
-                "features": [
-                    "Unlimited connected accounts",
-                    "Enterprise-grade webhooks",
-                    "Advanced trade execution rules",
-                    "Priority email & chat support",
-                    "Early access to new features",
-                    "Custom strategy development"
-                ]
-            }
-        ]
     }
 
 # Background task handlers

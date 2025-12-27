@@ -353,16 +353,20 @@ async def list_broker_accounts(
         if subscription and not settings.SKIP_SUBSCRIPTION_CHECK:
             user_tier = subscription.tier
             max_accounts = float('inf')
-            
-            if user_tier == "starter":
-                max_accounts = 1
-            elif user_tier == "pro":
-                max_accounts = 5
-                
+
+            if user_tier == "free":
+                max_accounts = 0
+            elif user_tier == "starter":
+                max_accounts = 2
+            elif user_tier == "trader":
+                max_accounts = 10
+
             # Add upgrade suggestion if approaching limit
-            if len(accounts) >= max_accounts - 1 and user_tier != "elite":
-                next_tier = "pro" if user_tier == "starter" else "elite"
-                
+            if len(accounts) >= max_accounts - 1 and user_tier != "unlimited":
+                next_tier_map = {"free": "starter", "starter": "trader", "trader": "unlimited"}
+                next_tier = next_tier_map.get(user_tier, "starter")
+                next_tier_limit_map = {"starter": "2", "trader": "10", "unlimited": "Unlimited"}
+
                 # Add upgrade headers for frontend to use
                 if response:
                     response.headers["X-Upgrade-Recommended"] = "true"
@@ -371,7 +375,7 @@ async def list_broker_accounts(
                     response.headers["X-Upgrade-URL"] = f"{settings.FRONTEND_URL}/pricing?from={user_tier}&to={next_tier}"
                     response.headers["X-Accounts-Used"] = str(len(accounts))
                     response.headers["X-Accounts-Limit"] = str(max_accounts)
-                    response.headers["X-Next-Tier-Limit"] = "5" if next_tier == "pro" else "Unlimited"
+                    response.headers["X-Next-Tier-Limit"] = next_tier_limit_map.get(next_tier, "Unlimited")
 
         # IMPORTANT: Always return the account_list directly, not wrapped in an object
         return account_list

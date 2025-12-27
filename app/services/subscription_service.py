@@ -5,11 +5,10 @@ import logging
 from datetime import datetime, timedelta
 
 from app.core.subscription_tiers import (
-    SubscriptionTier, 
-    get_tier_limit, 
-    check_resource_limit, 
-    is_feature_allowed,
-    get_tier_display_name
+    SubscriptionTier,
+    get_tier_limit,
+    check_resource_limit,
+    is_feature_allowed
 )
 from app.models.subscription import Subscription
 from app.models.broker import BrokerAccount
@@ -35,8 +34,8 @@ class SubscriptionService:
         """Get a user's subscription tier"""
         subscription = self.get_user_subscription(user_id)
         if not subscription:
-            # Default to starter tier if no subscription found
-            return SubscriptionTier.STARTER
+            # Default to free tier if no subscription found
+            return SubscriptionTier.FREE.value
         return subscription.tier
     
     def count_user_resources(self, user_id: int) -> Dict[str, int]:
@@ -95,11 +94,12 @@ class SubscriptionService:
     def can_add_resource(self, user_id: int, resource: str) -> Tuple[bool, str]:
         """
         Check if a user can add a new resource based on their subscription tier
-        
+
         Args:
             user_id: User ID
-            resource: Resource type (connected_accounts, active_webhooks, active_strategies)
-            
+            resource: Resource type (connected_accounts, active_webhooks, active_strategies,
+                      owned_strategies, subscribed_strategies)
+
         Returns:
             Tuple of (allowed: bool, message: str)
         """
@@ -107,33 +107,51 @@ class SubscriptionService:
         subscription = self.get_user_subscription(user_id)
         if subscription and subscription.is_lifetime and subscription.status == "active":
             return True, f"Unlimited access (lifetime user)"
-        
+
+        # Phase 1.2: Handle user mode for strategy creation
+        if resource == "owned_strategies":
+            from app.models.user import User, UserMode
+            user = self.db.query(User).filter(User.id == user_id).first()
+
+            if user and user.user_mode == UserMode.SUBSCRIBER:
+                return False, "Subscribers cannot create strategies. Upgrade to a creator plan to create your own strategies."
+
+        # Phase 1.2: Subscribers have unlimited subscriptions to strategies
+        if resource == "subscribed_strategies":
+            return True, "Unlimited strategy subscriptions"
+
         tier = self.get_user_tier(user_id)
         resources = self.count_user_resources(user_id)
-        
-        current_count = resources.get(resource, 0)
-        limit = get_tier_limit(tier, resource)
-        
+
+        # Map new resource names to existing counters if needed
+        resource_key = resource
+        if resource == "owned_strategies":
+            resource_key = "active_strategies"  # Use existing counter for now
+
+        current_count = resources.get(resource_key, 0)
+        limit = get_tier_limit(tier, resource_key)
+
         # Check if unlimited
         if limit == float('inf'):
             return True, f"Allowed ({tier} tier has unlimited {resource})"
-        
+
         # Check if under limit
         if current_count < limit:
             return True, f"Allowed ({current_count + 1}/{limit} {resource})"
-        
+
         # Use proper upgrade prompt system for consistent messaging
         from app.core.upgrade_prompts import get_upgrade_message, UpgradeReason
-        
+
         reason_mapping = {
             "connected_accounts": UpgradeReason.ACCOUNT_LIMIT,
             "active_webhooks": UpgradeReason.WEBHOOK_LIMIT,
             "active_strategies": UpgradeReason.STRATEGY_LIMIT,
+            "owned_strategies": UpgradeReason.STRATEGY_LIMIT,
         }
-        
+
         reason = reason_mapping.get(resource, UpgradeReason.ADVANCED_FEATURES)
         message = get_upgrade_message(reason, tier)
-        
+
         return False, message
     
     def get_tier_limit(self, tier: str, resource: str) -> int:
@@ -163,50 +181,77 @@ class SubscriptionService:
         
         # Determine required tier for this feature
         required_tier = None
-        for t in [SubscriptionTier.STARTER, SubscriptionTier.PRO, SubscriptionTier.ELITE]:
-            if is_feature_allowed(t, feature):
+        for t in [SubscriptionTier.FREE, SubscriptionTier.STARTER, SubscriptionTier.TRADER, SubscriptionTier.UNLIMITED]:
+            if is_feature_allowed(t.value, feature):
                 required_tier = t
                 break
-        
+
         if required_tier:
-            return False, f"Feature '{feature}' requires {required_tier} tier or higher"
+            return False, f"Feature '{feature}' requires {required_tier.value.capitalize()} tier or higher"
         else:
             return False, f"Feature '{feature}' is not available on your {tier} plan"
 
     def get_tier_comparison(self) -> Dict[str, Dict[str, Any]]:
         """
         Get a comparison of available subscription tiers
-        
+
         Returns:
             Dict with tier information and features
         """
         return {
-            # Using internal tier IDs but with updated display names, limits, and prices
-            "pro": {  # Internal tier ID (was Pro, now displayed as "Starter")
-                "name": "Starter",  # New display name
-                "connected_accounts": get_tier_limit(SubscriptionTier.PRO, "connected_accounts"),
-                "active_webhooks": get_tier_limit(SubscriptionTier.PRO, "active_webhooks"),
-                "active_strategies": get_tier_limit(SubscriptionTier.PRO, "active_strategies"),
-                "group_strategies": is_feature_allowed(SubscriptionTier.PRO, "group_strategies_allowed"),
-                "can_share_webhooks": is_feature_allowed(SubscriptionTier.PRO, "can_share_webhooks"),
-                "api_rate_limit": "500/min",
-                "webhook_rate_limit": "300/min",
+            "free": {
+                "name": "Free",
+                "connected_accounts": 0,
+                "active_webhooks": 0,
+                "active_strategies": 0,
+                "group_strategies": False,
+                "can_share_webhooks": False,
+                "can_execute": False,
+                "marketplace_subscribe": False,
+                "marketplace_sell": False,
+                "price_monthly": "$0",
+                "price_yearly": "$0",
+            },
+            "starter": {
+                "name": "Starter",
+                "connected_accounts": get_tier_limit(SubscriptionTier.STARTER.value, "connected_accounts"),
+                "active_webhooks": get_tier_limit(SubscriptionTier.STARTER.value, "active_webhooks"),
+                "active_strategies": get_tier_limit(SubscriptionTier.STARTER.value, "active_strategies"),
+                "group_strategies": is_feature_allowed(SubscriptionTier.STARTER.value, "group_strategies_allowed"),
+                "can_share_webhooks": is_feature_allowed(SubscriptionTier.STARTER.value, "can_share_webhooks"),
+                "can_execute": True,
+                "marketplace_subscribe": True,
+                "marketplace_sell": False,
                 "price_monthly": "$49/month",
                 "price_yearly": "$468/year ($39/month)",
                 "has_trial": "7-day free trial"
             },
-            "elite": {  # Internal tier ID (was Elite, now displayed as "Pro")
-                "name": "Pro",  # New display name
+            "trader": {
+                "name": "Trader",
+                "connected_accounts": get_tier_limit(SubscriptionTier.TRADER.value, "connected_accounts"),
+                "active_webhooks": get_tier_limit(SubscriptionTier.TRADER.value, "active_webhooks"),
+                "active_strategies": get_tier_limit(SubscriptionTier.TRADER.value, "active_strategies"),
+                "group_strategies": is_feature_allowed(SubscriptionTier.TRADER.value, "group_strategies_allowed"),
+                "can_share_webhooks": is_feature_allowed(SubscriptionTier.TRADER.value, "can_share_webhooks"),
+                "can_execute": True,
+                "marketplace_subscribe": True,
+                "marketplace_sell": True,
+                "price_monthly": "$129/month",
+                "price_yearly": "$1,188/year (~$99/month)",
+                "has_trial": "7-day free trial"
+            },
+            "unlimited": {
+                "name": "Unlimited",
                 "connected_accounts": "Unlimited",
                 "active_webhooks": "Unlimited",
                 "active_strategies": "Unlimited",
-                "group_strategies": is_feature_allowed(SubscriptionTier.ELITE, "group_strategies_allowed"),
-                "can_share_webhooks": is_feature_allowed(SubscriptionTier.ELITE, "can_share_webhooks"),
-                "api_rate_limit": "Unlimited",
-                "webhook_rate_limit": "Unlimited",
-                "price_monthly": "$89/month",
-                "price_yearly": "$828/year ($69/month)",
-                "price_lifetime": "$1,990 (one-time payment)",
+                "group_strategies": True,
+                "can_share_webhooks": True,
+                "can_execute": True,
+                "marketplace_subscribe": True,
+                "marketplace_sell": True,
+                "price_monthly": "$249/month",
+                "price_yearly": "$2,388/year (~$199/month)",
                 "has_trial": "7-day free trial"
             }
         }
@@ -259,14 +304,14 @@ class SubscriptionService:
             self.db.rollback()
             raise
     
-    def create_trial_subscription(self, user_id: int, tier: str = "pro") -> Subscription:
+    def create_trial_subscription(self, user_id: int, tier: str = "starter") -> Subscription:
         """
         Create a new subscription with a trial period
-        
+
         Args:
             user_id: User ID to create subscription for
-            tier: Tier to create ("pro" for new Starter, "elite" for new Pro)
-            
+            tier: Tier to create (starter, trader, unlimited)
+
         Returns:
             Subscription: The created subscription
         """
@@ -342,19 +387,19 @@ class SubscriptionService:
             Dict with upgrade recommendations
         """
         tier = self.get_user_tier(user_id)
-        if tier == SubscriptionTier.ELITE:
+        if tier == SubscriptionTier.UNLIMITED.value:
             return {"recommendations": [], "message": "You are already on the highest tier."}
-            
+
         # Get current resource usage
         resources = self.count_user_resources(user_id)
-        
+
         # Get current tier limits
         current_limits = {
             "connected_accounts": get_tier_limit(tier, "connected_accounts"),
             "active_webhooks": get_tier_limit(tier, "active_webhooks"),
             "active_strategies": get_tier_limit(tier, "active_strategies")
         }
-        
+
         # Check which resources are approaching limits (80% or more)
         approaching_limits = []
         for resource, count in resources.items():
@@ -366,20 +411,23 @@ class SubscriptionService:
                     "limit": limit,
                     "percentage": round((count / limit) * 100, 1)
                 })
-        
-        # Determine next tier to recommend based on internal tier ID
+
+        # Determine next tier to recommend
         next_tier = None
         next_tier_display_name = None
-        if tier == SubscriptionTier.STARTER:
-            next_tier = SubscriptionTier.PRO
+        if tier == SubscriptionTier.FREE.value:
+            next_tier = SubscriptionTier.STARTER.value
             next_tier_display_name = "Starter"
-        elif tier == SubscriptionTier.PRO:
-            next_tier = SubscriptionTier.ELITE
-            next_tier_display_name = "Pro"
-        
+        elif tier == SubscriptionTier.STARTER.value:
+            next_tier = SubscriptionTier.TRADER.value
+            next_tier_display_name = "Trader"
+        elif tier == SubscriptionTier.TRADER.value:
+            next_tier = SubscriptionTier.UNLIMITED.value
+            next_tier_display_name = "Unlimited"
+
         # Generate recommendations
         recommendations = []
-        
+
         if approaching_limits:
             recommendations.append({
                 "type": "resource_limits",
@@ -387,10 +435,10 @@ class SubscriptionService:
                 "resources": approaching_limits,
                 "recommendation": f"Upgrade to {next_tier_display_name} for higher limits."
             })
-        
+
         return {
             "current_tier": tier,
-            "current_tier_display": get_tier_display_name(tier),
+            "current_tier_display": tier.capitalize() if tier else "Free",
             "next_tier": next_tier,
             "next_tier_display": next_tier_display_name,
             "recommendations": recommendations,

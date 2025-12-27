@@ -211,7 +211,8 @@ class Settings(BaseSettings):
     TRADOVATE_DEMO_RENEW_TOKEN_URL: Optional[str] = None
 
     STRIPE_SECRET_KEY: str
-    STRIPE_WEBHOOK_SECRET: str  
+    STRIPE_WEBHOOK_SECRET: str  # Platform webhook secret (subscriptions)
+    STRIPE_CONNECT_WEBHOOK_SECRET: str = ""  # Connect webhook secret (marketplace/creators)
     STRIPE_PUBLIC_KEY: str
 
     DEV_STRIPE_SUCCESS_URL: str = "http://localhost:3000/payment/success"
@@ -223,12 +224,15 @@ class Settings(BaseSettings):
     STRIPE_SUCCESS_URL: str = "https://atomiktrading.io/payment/success"
     STRIPE_CANCEL_URL: str = "https://atomiktrading.io/pricing"
 
-    STRIPE_PRICE_PRO_MONTHLY: str = ""
-    STRIPE_PRICE_PRO_YEARLY: str = ""
-    STRIPE_PRICE_PRO_LIFETIME: str = ""
-    STRIPE_PRICE_ELITE_MONTHLY: str = ""
-    STRIPE_PRICE_ELITE_YEARLY: str = ""
-    STRIPE_PRICE_ELITE_LIFETIME: str = ""
+    # New tier pricing (no lifetime plans)
+    STRIPE_PRICE_STARTER_MONTHLY: str = ""
+    STRIPE_PRICE_STARTER_YEARLY: str = ""
+    STRIPE_PRICE_TRADER_MONTHLY: str = ""
+    STRIPE_PRICE_TRADER_YEARLY: str = ""
+    STRIPE_PRICE_UNLIMITED_MONTHLY: str = ""
+    STRIPE_PRICE_UNLIMITED_YEARLY: str = ""
+    # Grandfathered price for existing Elite users at $189/month
+    STRIPE_PRICE_UNLIMITED_GRANDFATHERED: str = ""
 
     # Rewardful Configuration
     REWARDFUL_API_SECRET: str = ""
@@ -247,11 +251,11 @@ class Settings(BaseSettings):
 
     def get_stripe_price_id(self, tier: str, interval: str) -> str:
         """Get the Stripe Price ID for a specific tier and interval with validation"""
-        if tier not in ['pro', 'elite']:
+        if tier not in ['starter', 'trader', 'unlimited']:
             return None
-        if interval not in ['monthly', 'yearly', 'lifetime']:
+        if interval not in ['monthly', 'yearly']:
             return None
-            
+
         var_name = f"STRIPE_PRICE_{tier.upper()}_{interval.upper()}"
         return getattr(self, var_name, "")
 

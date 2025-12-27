@@ -58,8 +58,13 @@ class Subscription(Base):
     is_lifetime = Column(Boolean, default=False)
     is_legacy_free = Column(Boolean, default=False)  # Track grandfathered free users
     connected_accounts_count = Column(Integer, default=0)
-    active_webhooks_count = Column(Integer, default=0) 
+    active_webhooks_count = Column(Integer, default=0)
     active_strategies_count = Column(Integer, default=0)
+
+    # Phase 1.2: Split resource counters for owned vs subscribed strategies
+    owned_strategies_count = Column(Integer, default=0, nullable=False)  # Strategies user created
+    subscribed_strategies_count = Column(Integer, default=0, nullable=False)  # Strategies user subscribed to
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

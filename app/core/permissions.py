@@ -82,9 +82,9 @@ def check_subscription(func: Callable):
 def require_tier(minimum_tier: str):
     """
     Decorator to check if user has required subscription tier
-    
+
     Args:
-        minimum_tier: Minimum required tier (starter, pro, elite)
+        minimum_tier: Minimum required tier (free, starter, trader, unlimited)
     """
     def decorator(func: Callable):
         @wraps(func)
@@ -103,18 +103,20 @@ def require_tier(minimum_tier: str):
                 
                 user_tier = current_user.subscription.tier
                 tier_levels = {
-                    "starter": 0,
-                    "pro": 1,
-                    "elite": 2
+                    "free": 0,
+                    "starter": 1,
+                    "trader": 2,
+                    "unlimited": 3
                 }
                 
                 if tier_levels.get(user_tier.lower(), -1) < tier_levels.get(minimum_tier.lower(), 0):
                     # Map required tier to reason code
                     reason_mapping = {
-                        "pro": UpgradeReason.ADVANCED_FEATURES,
-                        "elite": UpgradeReason.ADVANCED_FEATURES
+                        "starter": UpgradeReason.ADVANCED_FEATURES,
+                        "trader": UpgradeReason.ADVANCED_FEATURES,
+                        "unlimited": UpgradeReason.ADVANCED_FEATURES
                     }
-                    
+
                     reason = reason_mapping.get(minimum_tier.lower(), UpgradeReason.ADVANCED_FEATURES)
                     
                     # Add upgrade headers if response object available

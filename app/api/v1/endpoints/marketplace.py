@@ -905,11 +905,12 @@ async def handle_strategy_webhook(
 
         payload = await request.body()
 
-        # Verify webhook signature using STRATEGY webhook secret
+        # Verify webhook signature using Connect webhook secret
         try:
             import stripe
-            # Use STRIPE_STRATEGY_WEBHOOK_SECRET for marketplace strategy purchases
-            webhook_secret = getattr(settings, 'STRIPE_STRATEGY_WEBHOOK_SECRET', settings.STRIPE_WEBHOOK_SECRET)
+            # Use STRIPE_CONNECT_WEBHOOK_SECRET for connected account events (marketplace/creators)
+            # Falls back to main webhook secret if not configured
+            webhook_secret = settings.STRIPE_CONNECT_WEBHOOK_SECRET or settings.STRIPE_WEBHOOK_SECRET
             event = stripe.Webhook.construct_event(
                 payload, sig_header, webhook_secret
             )

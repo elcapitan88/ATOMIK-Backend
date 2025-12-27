@@ -315,15 +315,15 @@ async def get_webhooks_root(
             user_tier = subscription.tier
             max_webhooks = float('inf')
 
-            if user_tier == "starter":
-                max_webhooks = 1
-            elif user_tier == "pro":
-                max_webhooks = 5
+            if user_tier == "free":
+                max_webhooks = 0
+            elif user_tier == "starter":
+                max_webhooks = 3
+            elif user_tier == "trader":
+                max_webhooks = 10
 
             # Add upgrade headers if approaching limit
-            if len(webhooks) >= max_webhooks - 1 and user_tier != "elite":
-                next_tier = "pro" if user_tier == "starter" else "elite"
-
+            if len(webhooks) >= max_webhooks - 1 and user_tier != "unlimited":
                 if response:
                     add_upgrade_headers(response, user_tier, UpgradeReason.WEBHOOK_LIMIT)
 

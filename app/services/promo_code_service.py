@@ -193,22 +193,22 @@ class PromoCodeService:
                 # Increment usage counter
                 promo_code.current_uses += 1
                 
-                # Create or update user's subscription to Elite lifetime
+                # Create or update user's subscription to Unlimited lifetime
                 subscription = self.db.query(Subscription).filter(
                     Subscription.user_id == user_id
                 ).first()
-                
+
                 if subscription:
                     # Update existing subscription
-                    subscription.tier = "elite"
+                    subscription.tier = "unlimited"
                     subscription.is_lifetime = True
                     subscription.status = "active"
                     subscription.updated_at = datetime.utcnow()
                 else:
-                    # Create new elite subscription
+                    # Create new unlimited subscription
                     subscription = Subscription(
                         user_id=user_id,
-                        tier="elite",
+                        tier="unlimited",
                         status="active",
                         is_lifetime=True,
                         created_at=datetime.utcnow(),

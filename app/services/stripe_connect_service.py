@@ -37,13 +37,13 @@ class StripeConnectService:
                 controller={
                     "requirement_collection": "application",
                     "losses": {
-                        "payments": "application"
+                        "payments": "stripe"  # Stripe assumes liability for chargebacks
                     },
                     "fees": {
-                        "payer": "application"
+                        "payer": "account"  # Connected account pays Stripe fees
                     },
                     "stripe_dashboard": {
-                        "type": "none"
+                        "type": "express"  # Required for Stripe-managed liability
                     }
                 },
                 metadata={

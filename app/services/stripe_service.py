@@ -118,25 +118,25 @@ class StripeService:
             )
 
     async def create_checkout_session_with_trial(
-        self, 
-        customer_email: str, 
-        tier: str, 
-        interval: str, 
-        success_url: str, 
+        self,
+        customer_email: str,
+        tier: str,
+        interval: str,
+        success_url: str,
         cancel_url: str,
         metadata: dict = None
     ) -> str:
         """
-        Create a Stripe checkout session with a 14-day trial period
-        
+        Create a Stripe checkout session with a 7-day trial period
+
         Args:
             customer_email: Customer's email
-            tier: Subscription tier (internal id - 'pro' or 'elite')
-            interval: Billing interval (monthly, yearly, lifetime)
+            tier: Subscription tier (starter, trader, unlimited)
+            interval: Billing interval (monthly, yearly)
             success_url: URL to redirect on success
             cancel_url: URL to redirect on cancel
             metadata: Additional metadata for the session
-            
+
         Returns:
             str: Checkout session URL
         """
@@ -145,28 +145,27 @@ class StripeService:
             price_id = self._get_price_id(tier, interval)
             if not price_id:
                 raise ValueError(f"No price found for tier {tier} with interval {interval}")
-            
-            # Determine if we should use a trial period
-            # Note: Lifetime plans should not have trials
-            use_trial = interval != 'lifetime'
-            
+
+            # All subscription plans can have trials
+            use_trial = True
+
             # Build base metadata
             base_metadata = {
                 'tier': tier,
                 'interval': interval,
                 'has_trial': str(use_trial)
             }
-            
+
             # Merge with custom metadata
             if metadata:
                 base_metadata.update(metadata)
-                
+
             # Include referral tracking if present
             if metadata and 'referral_code' in metadata:
                 base_metadata['fp_referral_code'] = metadata['referral_code']
             if metadata and 'referral_token' in metadata:
                 base_metadata['fp_referral_token'] = metadata['referral_token']
-            
+
             # Create checkout session parameters
             session_params = {
                 'payment_method_types': ['card'],
@@ -176,24 +175,24 @@ class StripeService:
                         'quantity': 1,
                     },
                 ],
-                'mode': 'subscription' if interval != 'lifetime' else 'payment',
+                'mode': 'subscription',
                 'success_url': success_url,
                 'cancel_url': cancel_url,
                 'metadata': base_metadata,
                 'customer_email': customer_email
             }
-            
-            # Add trial period for subscription mode
-            if use_trial and interval != 'lifetime':
+
+            # Add 7-day trial period for subscription mode
+            if use_trial:
                 session_params['subscription_data'] = {
-                    'trial_period_days': 14
+                    'trial_period_days': 7
                 }
-            
+
             # Create session
             session = stripe.checkout.Session.create(**session_params)
-            
+
             return session.url
-            
+
         except stripe.StripeError as e:
             self.logger.error(f"Stripe API error: {str(e)}")
             raise
@@ -201,22 +200,26 @@ class StripeService:
     def _get_price_id(self, tier: str, interval: str) -> str:
         """
         Get the Stripe Price ID for a specific tier and interval
-        
-        Note: Here the tier is the internal tier ID (pro, elite)
-              not the marketing name (Starter, Pro)
+
+        Tier mapping:
+        - starter: $49/month (entry-level paid tier)
+        - trader: $129/month (most popular)
+        - unlimited: $249/month (highest tier)
         """
         price_mapping = {
-            # Pro tier (now marketed as "Starter")
-            ('pro', 'monthly'): settings.STRIPE_PRICE_PRO_MONTHLY,
-            ('pro', 'yearly'): settings.STRIPE_PRICE_PRO_YEARLY,
-            ('pro', 'lifetime'): settings.STRIPE_PRICE_PRO_LIFETIME,
-            
-            # Elite tier (now marketed as "Pro")
-            ('elite', 'monthly'): settings.STRIPE_PRICE_ELITE_MONTHLY,
-            ('elite', 'yearly'): settings.STRIPE_PRICE_ELITE_YEARLY,
-            ('elite', 'lifetime'): settings.STRIPE_PRICE_ELITE_LIFETIME,
+            # Starter tier - $49/month
+            ('starter', 'monthly'): settings.STRIPE_PRICE_STARTER_MONTHLY,
+            ('starter', 'yearly'): settings.STRIPE_PRICE_STARTER_YEARLY,
+
+            # Trader tier - $129/month
+            ('trader', 'monthly'): settings.STRIPE_PRICE_TRADER_MONTHLY,
+            ('trader', 'yearly'): settings.STRIPE_PRICE_TRADER_YEARLY,
+
+            # Unlimited tier - $249/month
+            ('unlimited', 'monthly'): settings.STRIPE_PRICE_UNLIMITED_MONTHLY,
+            ('unlimited', 'yearly'): settings.STRIPE_PRICE_UNLIMITED_YEARLY,
         }
-        
+
         return price_mapping.get((tier, interval))
 
     async def create_portal_session(self, customer_id: str) -> str:
