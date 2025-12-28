@@ -33,7 +33,8 @@ class StripeConnectService:
                     "transfers": {"requested": True},
                 },
                 business_type="individual",  # Default to individual
-                # Controller settings for Express accounts with Stripe liability
+                # Controller settings: Stripe handles KYC & liability, platform pays fees
+                # Note: stripe_dashboard "none" required for Stripe to assume liability
                 controller={
                     "requirement_collection": "stripe",  # Stripe handles KYC/identity verification
                     "losses": {
@@ -43,7 +44,7 @@ class StripeConnectService:
                         "payer": "application"  # Platform pays Stripe fees
                     },
                     "stripe_dashboard": {
-                        "type": "express"  # Creators get limited Stripe dashboard for payouts
+                        "type": "none"  # No Stripe dashboard - we build custom creator dashboard
                     }
                 },
                 metadata={
