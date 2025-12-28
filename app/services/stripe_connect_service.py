@@ -33,17 +33,17 @@ class StripeConnectService:
                     "transfers": {"requested": True},
                 },
                 business_type="individual",  # Default to individual
-                # Set requirement collection to application for embedded components
+                # Controller settings for Express accounts with Stripe liability
                 controller={
-                    "requirement_collection": "application",
+                    "requirement_collection": "stripe",  # Stripe handles KYC/identity verification
                     "losses": {
-                        "payments": "stripe"  # Stripe assumes liability for chargebacks
+                        "payments": "stripe"  # Stripe assumes liability for negative balances
                     },
                     "fees": {
-                        "payer": "account"  # Connected account pays Stripe fees
+                        "payer": "application"  # Platform pays Stripe fees
                     },
                     "stripe_dashboard": {
-                        "type": "express"  # Required for Stripe-managed liability
+                        "type": "express"  # Creators get limited Stripe dashboard for payouts
                     }
                 },
                 metadata={
