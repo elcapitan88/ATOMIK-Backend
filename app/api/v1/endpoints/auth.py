@@ -936,7 +936,81 @@ async def prepare_registration(
             status_code=500,
             detail=f"Failed to prepare registration: {str(e)}"
         )
-    
+
+
+class SessionTokenRequest(BaseModel):
+    session_token: str
+
+
+@router.post("/get-credentials-by-token", response_model=Token)
+async def get_credentials_by_token(
+    request: SessionTokenRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Exchange a session token for auth tokens after successful payment.
+    This endpoint is used to auto-login users after Stripe checkout completes.
+    The session token proves the user completed payment and their account was created.
+    """
+    try:
+        session_token = request.session_token
+
+        if not session_token:
+            raise HTTPException(status_code=400, detail="Session token is required")
+
+        # Find the pending registration by session token
+        pending_reg = db.query(PendingRegistration).filter(
+            PendingRegistration.session_token == session_token
+        ).first()
+
+        if not pending_reg:
+            logger.warning(f"No pending registration found for session token: {session_token[:8]}...")
+            raise HTTPException(status_code=404, detail="Session token not found or expired")
+
+        # Check if expired
+        if pending_reg.is_expired():
+            logger.warning(f"Expired session token used: {session_token[:8]}...")
+            raise HTTPException(status_code=400, detail="Session token has expired")
+
+        # Find the user by email (webhook should have created the account)
+        user = db.query(User).filter(User.email == pending_reg.email).first()
+
+        if not user:
+            logger.warning(f"User not found for email {pending_reg.email} with session token {session_token[:8]}...")
+            raise HTTPException(
+                status_code=404,
+                detail="User account not found. Please wait a moment and try again."
+            )
+
+        # Generate access token
+        access_token = create_access_token(data={"sub": user.username})
+
+        # Mark pending registration as completed
+        pending_reg.status = "completed"
+        db.commit()
+
+        logger.info(f"Auto-login successful for user {user.email} via session token")
+
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "username": user.username,
+                "subscription_tier": user.subscription.tier if user.subscription else "free"
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get-credentials-by-token: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to authenticate with session token"
+        )
+
 
 @router.post("/apply-promo-code", response_model=Dict[str, Any])
 async def apply_promo_code(
