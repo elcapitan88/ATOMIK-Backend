@@ -982,8 +982,8 @@ async def get_credentials_by_token(
                 detail="User account not found. Please wait a moment and try again."
             )
 
-        # Generate access token
-        access_token = create_access_token(user.username)
+        # Generate access token (subject must be email, not username)
+        access_token = create_access_token(subject=user.email)
 
         # Mark pending registration as completed
         pending_reg.status = "completed"
