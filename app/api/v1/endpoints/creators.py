@@ -1,5 +1,5 @@
 # app/api/v1/endpoints/creators.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
@@ -365,13 +365,23 @@ async def get_tier_progress(
 
 @router.post("/create-account-session")
 async def create_account_session(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Create an Account Session for Stripe Embedded Components.
     This enables in-app Stripe onboarding without redirects.
+    Supports component_type: "onboarding" (default) or "management"
     """
+    # Parse request body for component_type
+    try:
+        body = await request.json()
+        component_type = body.get("component_type", "onboarding")
+    except:
+        component_type = "onboarding"
+
+    logger.info(f"Creating account session with component_type: {component_type}")
     try:
         # Use database row-level locking to prevent race condition
         creator_profile = db.query(CreatorProfile).filter(
@@ -415,7 +425,8 @@ async def create_account_session(
         # Create account session for embedded components
         account_session = await stripe_connect_service.create_account_session(
             account_id=creator_profile.stripe_connect_account_id,
-            creator_profile=creator_profile
+            creator_profile=creator_profile,
+            component_type=component_type
         )
         
         logger.info(f"Account session created for creator {creator_profile.id}")

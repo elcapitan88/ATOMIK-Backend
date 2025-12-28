@@ -371,17 +371,49 @@ class StripeConnectService:
     async def create_account_session(
         self,
         account_id: str,
-        creator_profile: Optional[CreatorProfile] = None
+        creator_profile: Optional[CreatorProfile] = None,
+        component_type: str = "onboarding"
     ) -> Dict[str, Any]:
         """
         Create an Account Session for Stripe Embedded Components.
         This enables in-app onboarding without redirects.
+
+        component_type options:
+        - "onboarding": For initial account setup (account_onboarding component)
+        - "management": For account management after setup (account_management, payments, payouts)
         """
         try:
-            # Prepare account session data with embedded onboarding configuration
-            session_data = {
-                "account": account_id,
-                "components": {
+            # Build components based on the requested type
+            if component_type == "management":
+                # Enable account management, payments, and payouts for post-onboarding management
+                components = {
+                    "account_management": {
+                        "enabled": True,
+                        "features": {
+                            "external_account_collection": True
+                        }
+                    },
+                    "payments": {
+                        "enabled": True,
+                        "features": {
+                            "refund_management": True,
+                            "dispute_management": True,
+                            "capture_payments": True
+                        }
+                    },
+                    "payouts": {
+                        "enabled": True,
+                        "features": {
+                            "instant_payouts": True,
+                            "standard_payouts": True,
+                            "edit_payout_schedule": True,
+                            "external_account_collection": True
+                        }
+                    }
+                }
+            else:
+                # Default: onboarding components
+                components = {
                     "account_onboarding": {
                         "enabled": True,
                         "features": {
@@ -393,21 +425,25 @@ class StripeConnectService:
                         }
                     }
                 }
+
+            session_data = {
+                "account": account_id,
+                "components": components
             }
-            
-            logger.info(f"Creating account session with config: {session_data}")
-            
+
+            logger.info(f"Creating account session with component_type={component_type}, config: {session_data}")
+
             # Create the account session
             account_session = stripe.AccountSession.create(**session_data)
-            
+
             logger.info(f"Created account session for Stripe account {account_id}")
-            
+
             return {
                 "client_secret": account_session.client_secret,
                 "account_id": account_id,
                 "expires_at": account_session.expires_at
             }
-            
+
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating account session: {str(e)}")
             raise Exception(f"Failed to create account session: {str(e)}")
