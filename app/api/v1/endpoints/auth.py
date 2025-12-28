@@ -983,7 +983,7 @@ async def get_credentials_by_token(
             )
 
         # Generate access token
-        access_token = create_access_token(data={"sub": user.username})
+        access_token = create_access_token(user.username)
 
         # Mark pending registration as completed
         pending_reg.status = "completed"
