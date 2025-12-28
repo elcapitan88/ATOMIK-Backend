@@ -53,5 +53,16 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
+class TokenUserInfo(BaseModel):
+    id: int
+    email: str
+    username: str
+    subscription_tier: Optional[str] = "free"
+
+class TokenWithUser(BaseModel):
+    access_token: str
+    token_type: str
+    user: TokenUserInfo
+
 class TokenData(BaseModel):
     email: str | None = None

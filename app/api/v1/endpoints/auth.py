@@ -22,7 +22,7 @@ from ....core.security import (
     get_current_user
 )
 from sqlalchemy.exc import SQLAlchemyError
-from ....schemas.user import UserCreate, UserOut, Token
+from ....schemas.user import UserCreate, UserOut, Token, TokenWithUser
 from ....models.user import User
 from ....db.base import get_db
 from ....core.config import settings
@@ -942,7 +942,7 @@ class SessionTokenRequest(BaseModel):
     session_token: str
 
 
-@router.post("/get-credentials-by-token", response_model=Token)
+@router.post("/get-credentials-by-token", response_model=TokenWithUser)
 async def get_credentials_by_token(
     request: SessionTokenRequest,
     db: Session = Depends(get_db)
