@@ -407,55 +407,10 @@ async def create_account_session(
             creator_profile.stripe_connect_account_id = account_id
             db.commit()
             logger.info(f"Stripe account {account_id} saved for creator {creator_profile.id}")
-            
-            # Auto-accept TOS for newly created account
-            try:
-                logger.info(f"Auto-accepting TOS for newly created account {account_id}")
-                
-                # Get user IP from request headers or use fallback
-                user_ip = "127.0.0.1"  # Default fallback
-                user_agent = "Mozilla/5.0 (Atomik Trading Platform)"
-                
-                # Accept TOS immediately after account creation
-                await stripe_connect_service.accept_tos(
-                    account_id=account_id,
-                    user_ip=user_ip,
-                    user_agent=user_agent
-                )
-                logger.info(f"TOS auto-accepted for new account {account_id}")
-                
-            except Exception as tos_error:
-                logger.warning(f"Could not auto-accept TOS for new account: {tos_error}")
-                # Continue anyway - user can accept manually if needed
+            # Note: TOS acceptance is handled by Stripe during onboarding (requirement_collection: "stripe")
         else:
-            # Check if existing account has correct requirement_collection setting
-            try:
-                import stripe
-                existing_account = stripe.Account.retrieve(creator_profile.stripe_connect_account_id)
-                requirement_collection = existing_account.controller.requirement_collection
-                
-                if requirement_collection != "application":
-                    logger.info(f"Existing account has requirement_collection={requirement_collection}, need to recreate for embedded components")
-                    # Delete old account and create new one
-                    try:
-                        stripe.Account.delete(creator_profile.stripe_connect_account_id)
-                        logger.info(f"Deleted old Stripe account {creator_profile.stripe_connect_account_id}")
-                    except Exception as delete_error:
-                        logger.warning(f"Could not delete old account: {delete_error}")
-                    
-                    # Create new account with correct settings
-                    account_id = await stripe_connect_service.create_express_account(
-                        creator_profile=creator_profile
-                    )
-                    creator_profile.stripe_connect_account_id = account_id
-                    db.commit()
-                    logger.info(f"Created new Stripe account {account_id} with embedded support")
-                else:
-                    logger.info(f"Using existing Stripe account {creator_profile.stripe_connect_account_id} for creator {creator_profile.id}")
-                    
-            except Exception as check_error:
-                logger.warning(f"Could not check existing account settings: {check_error}")
-                logger.info(f"Using existing Stripe account {creator_profile.stripe_connect_account_id} for creator {creator_profile.id}")
+            # Use existing Stripe account
+            logger.info(f"Using existing Stripe account {creator_profile.stripe_connect_account_id} for creator {creator_profile.id}")
         
         # Create account session for embedded components
         account_session = await stripe_connect_service.create_account_session(
