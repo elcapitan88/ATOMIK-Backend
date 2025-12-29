@@ -182,9 +182,28 @@ async def get_creator_strategies(
             min_price = min(float(price.amount) for price in monetization.prices)
             estimated_revenue = float(monetization.estimated_monthly_revenue)
 
+        # Check if current user is subscribed to this strategy
+        is_subscribed = False
+        if current_user:
+            from app.models.webhook import WebhookSubscription
+            from app.models.strategy_purchases import StrategyPurchase
+            # Check for free subscription
+            free_sub = db.query(WebhookSubscription).filter(
+                WebhookSubscription.webhook_id == webhook.id,
+                WebhookSubscription.user_id == current_user.id
+            ).first()
+            # Check for paid subscription
+            paid_sub = db.query(StrategyPurchase).filter(
+                StrategyPurchase.webhook_id == webhook.id,
+                StrategyPurchase.user_id == current_user.id,
+                StrategyPurchase.status.in_(['active', 'completed'])
+            ).first()
+            is_subscribed = free_sub is not None or paid_sub is not None
+
         strategy_list.append({
             "id": str(monetization.id) if monetization else f"webhook_{webhook.id}",
             "webhook_id": webhook.id,
+            "token": webhook.token,
             "name": webhook.name,
             "description": webhook.details,
             "stripe_product_id": monetization.stripe_product_id if monetization else None,
@@ -193,6 +212,7 @@ async def get_creator_strategies(
             "min_price": min_price,
             "created_at": webhook.sharing_enabled_at or webhook.created_at,
             "is_monetized": monetization is not None,
+            "is_subscribed": is_subscribed,
             "usage_intent": webhook.usage_intent,
             "rating": webhook.rating or 0.0
         })
