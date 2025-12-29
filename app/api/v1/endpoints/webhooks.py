@@ -17,6 +17,7 @@ from ....db.session import get_db
 from ....models.user import User
 from ....models.webhook import Webhook, WebhookLog
 from ....models.subscription import Subscription
+from ....models.creator_profile import CreatorProfile
 from ....schemas.webhook import (
     WebhookCreate,
     WebhookUpdate,
@@ -861,9 +862,17 @@ async def subscribe_to_strategy(
             user_id=current_user.id
         )
         db.add(subscription)
-        
-        # Update subscriber count
+
+        # Update webhook subscriber count
         webhook.subscriber_count = (webhook.subscriber_count or 0) + 1
+
+        # Update creator's total subscriber count
+        creator_profile = db.query(CreatorProfile).filter(
+            CreatorProfile.user_id == webhook.user_id
+        ).first()
+        if creator_profile:
+            creator_profile.total_subscribers = (creator_profile.total_subscribers or 0) + 1
+            creator_profile.update_tier()  # Recalculate tier based on new subscriber count
 
         db.commit()
 
@@ -1007,10 +1016,18 @@ async def unsubscribe_from_strategy(
 
         # Delete subscription
         db.delete(subscription)
-        
-        # Update subscriber count
+
+        # Update webhook subscriber count
         if webhook.subscriber_count:
             webhook.subscriber_count = max(0, webhook.subscriber_count - 1)
+
+        # Update creator's total subscriber count
+        creator_profile = db.query(CreatorProfile).filter(
+            CreatorProfile.user_id == webhook.user_id
+        ).first()
+        if creator_profile and creator_profile.total_subscribers > 0:
+            creator_profile.total_subscribers -= 1
+            creator_profile.update_tier()  # Recalculate tier based on new subscriber count
 
         db.commit()
 

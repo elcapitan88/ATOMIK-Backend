@@ -85,11 +85,12 @@ async def get_creator_profile_by_username(
     if not creator_profile:
         raise HTTPException(status_code=404, detail="Creator profile not found")
 
-    # Count active strategies
-    strategy_count = db.query(func.count(StrategyMonetization.id)).filter(
+    # Count shared strategies (both monetized and free)
+    strategy_count = db.query(func.count(Webhook.id)).filter(
         and_(
-            StrategyMonetization.creator_user_id == user.id,
-            StrategyMonetization.is_active == True
+            Webhook.user_id == user.id,
+            Webhook.is_shared == True,
+            Webhook.is_active == True
         )
     ).scalar() or 0
 

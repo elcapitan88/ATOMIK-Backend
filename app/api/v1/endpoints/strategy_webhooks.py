@@ -11,6 +11,7 @@ from ....models.webhook import Webhook
 from ....models.user import User
 from ....models.strategy_monetization import StrategyMonetization
 from ....models.strategy_purchases import StrategyPurchase
+from ....models.creator_profile import CreatorProfile
 from ....services.stripe_connect_service import StripeConnectService
 
 router = APIRouter()
@@ -125,12 +126,21 @@ async def handle_checkout_completed(session_data: Dict[str, Any], db: Session):
         )
         
         db.add(purchase)
-        
+
         # Update strategy subscriber count
         pricing.total_subscribers += 1
-        
+
+        # Update creator's total subscriber count
+        if creator_user_id:
+            creator_profile = db.query(CreatorProfile).filter(
+                CreatorProfile.user_id == int(creator_user_id)
+            ).first()
+            if creator_profile:
+                creator_profile.total_subscribers = (creator_profile.total_subscribers or 0) + 1
+                creator_profile.update_tier()  # Recalculate tier based on new subscriber count
+
         db.commit()
-        
+
         logger.info(f"Created purchase record for session {session_id}")
         
     except Exception as e:
@@ -174,29 +184,43 @@ async def handle_subscription_cancelled(subscription_data: Dict[str, Any], db: S
     """
     try:
         subscription_id = subscription_data.get('id')
-        
+
         # Find the purchase record
         purchase = db.query(StrategyPurchase).filter(
             StrategyPurchase.stripe_subscription_id == subscription_id
         ).first()
-        
+
         if not purchase:
             logger.warning(f"No purchase found for cancelled subscription {subscription_id}")
             return
-        
+
         # Update purchase status
         purchase.status = 'cancelled'
-        
-        # Decrease subscriber count
+
+        # Get the webhook to find the creator
+        webhook = db.query(Webhook).filter(
+            Webhook.id == purchase.webhook_id
+        ).first()
+
+        # Decrease strategy subscriber count
         pricing = db.query(StrategyMonetization).filter(
             StrategyMonetization.webhook_id == purchase.webhook_id
         ).first()
-        
+
         if pricing and pricing.total_subscribers > 0:
             pricing.total_subscribers -= 1
-        
+
+        # Decrease creator's total subscriber count
+        if webhook:
+            creator_profile = db.query(CreatorProfile).filter(
+                CreatorProfile.user_id == webhook.user_id
+            ).first()
+            if creator_profile and creator_profile.total_subscribers > 0:
+                creator_profile.total_subscribers -= 1
+                creator_profile.update_tier()  # Recalculate tier
+
         db.commit()
-        
+
         logger.info(f"Cancelled subscription {subscription_id}")
         
     except Exception as e:
