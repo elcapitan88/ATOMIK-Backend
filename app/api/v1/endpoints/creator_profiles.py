@@ -186,7 +186,7 @@ async def get_creator_strategies(
         is_subscribed = False
         if current_user:
             from app.models.webhook import WebhookSubscription
-            from app.models.strategy_purchases import StrategyPurchase
+            from app.models.strategy_purchase import StrategyPurchase
             # Check for free subscription
             free_sub = db.query(WebhookSubscription).filter(
                 WebhookSubscription.webhook_id == webhook.id,
